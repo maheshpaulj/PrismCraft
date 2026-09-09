@@ -1,0 +1,248 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="src">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\core">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\rhi">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\player">
+      <UniqueIdentifier>{72D9321A-1B62-4822-B129-C5F7499D0F34}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\world">
+      <UniqueIdentifier>{6E5848C1-F04A-459E-B7C6-BBE32E40707D}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\renderer">
+      <UniqueIdentifier>{13B53655-B7D4-49FF-9ED6-CD1748DEFF79}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\ui">
+      <UniqueIdentifier>{D76E2721-C8E6-4903-888A-70231CDDF65C}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\game">
+      <UniqueIdentifier>{F4EBECA3-356C-49D0-9184-75466A7D8412}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\audio">
+      <UniqueIdentifier>{D3F1E2A4-5B6C-7D8E-9F0A-1B2C3D4E5F6A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets">
+      <UniqueIdentifier>{A3E9A0B1-2F3C-4D5E-6F7A-8B9C0D1E2F3A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="assets\shaders">
+      <UniqueIdentifier>{B4F0B1C2-3D4E-5F6A-7B8C-9D0E1F2A3B4C}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\main.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\Window.cpp">
+      <Filter>src\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\core\Input.cpp">
+      <Filter>src\core</Filter>
+    </ClCompile>
+    <ClCompile Include="src\rhi\VulkanContext.cpp">
+      <Filter>src\rhi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\rhi\Swapchain.cpp">
+      <Filter>src\rhi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\rhi\CommandQueue.cpp">
+      <Filter>src\rhi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\rhi\Pipeline.cpp">
+      <Filter>src\rhi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\rhi\Buffer.cpp">
+      <Filter>src\rhi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\rhi\VmaImpl.cpp">
+      <Filter>src\rhi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\player\Camera.cpp">
+      <Filter>src\player</Filter>
+    </ClCompile>
+    <ClCompile Include="src\player\Raycast.cpp">
+      <Filter>src\player</Filter>
+    </ClCompile>
+    <ClCompile Include="src\player\Player.cpp">
+      <Filter>src\player</Filter>
+    </ClCompile>
+    <ClCompile Include="src\world\Chunk.cpp">
+      <Filter>src\world</Filter>
+    </ClCompile>
+    <ClCompile Include="src\world\ChunkMesher.cpp">
+      <Filter>src\world</Filter>
+    </ClCompile>
+    <ClCompile Include="src\world\TerrainGen.cpp">
+      <Filter>src\world</Filter>
+    </ClCompile>
+    <ClCompile Include="src\world\World.cpp">
+      <Filter>src\world</Filter>
+    </ClCompile>
+    <ClCompile Include="src\world\FallingBlockManager.cpp">
+      <Filter>src\world</Filter>
+    </ClCompile>
+    <ClCompile Include="src\audio\AudioEngine.cpp">
+      <Filter>src\audio</Filter>
+    </ClCompile>
+    <ClCompile Include="src\rhi\Texture.cpp">
+      <Filter>src\rhi</Filter>
+    </ClCompile>
+    <ClCompile Include="src\renderer\TextureAtlas.cpp">
+      <Filter>src\renderer</Filter>
+    </ClCompile>
+    <ClCompile Include="src\renderer\CelestialRenderer.cpp">
+      <Filter>src\renderer</Filter>
+    </ClCompile>
+    <ClCompile Include="src\renderer\ItemDropRenderer.cpp">
+      <Filter>src\renderer</Filter>
+    </ClCompile>
+    <ClCompile Include="src\renderer\BlockCrackRenderer.cpp">
+      <Filter>src\renderer</Filter>
+    </ClCompile>
+    <ClCompile Include="src\renderer\HandRenderer.cpp">
+      <Filter>src\renderer</Filter>
+    </ClCompile>
+    <ClCompile Include="src\renderer\BlockOutlineRenderer.cpp">
+      <Filter>src\renderer</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\UIRenderer.cpp">
+      <Filter>src\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ui\MenuRenderer.cpp">
+      <Filter>src\ui</Filter>
+    </ClCompile>
+    <ClCompile Include="src\renderer\CloudRenderer.cpp">
+      <Filter>src\renderer</Filter>
+    </ClCompile>
+    <ClCompile Include="src\renderer\LightOverlayRenderer.cpp">
+      <Filter>src\renderer</Filter>
+    </ClCompile>
+    <ClCompile Include="src\game\Crafting.cpp">
+      <Filter>src\game</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\core\Window.hpp">
+      <Filter>src\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\Input.hpp">
+      <Filter>src\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\core\Timer.hpp">
+      <Filter>src\core</Filter>
+    </ClInclude>
+    <ClInclude Include="src\audio\AudioEngine.hpp">
+      <Filter>src\audio</Filter>
+    </ClInclude>
+    <ClInclude Include="src\rhi\RHICommon.hpp">
+      <Filter>src\rhi</Filter>
+    </ClInclude>
+    <ClInclude Include="src\rhi\VulkanContext.hpp">
+      <Filter>src\rhi</Filter>
+    </ClInclude>
+    <ClInclude Include="src\rhi\Swapchain.hpp">
+      <Filter>src\rhi</Filter>
+    </ClInclude>
+    <ClInclude Include="src\rhi\CommandQueue.hpp">
+      <Filter>src\rhi</Filter>
+    </ClInclude>
+    <ClInclude Include="src\rhi\Pipeline.hpp">
+      <Filter>src\rhi</Filter>
+    </ClInclude>
+    <ClInclude Include="src\rhi\Buffer.hpp">
+      <Filter>src\rhi</Filter>
+    </ClInclude>
+    <ClInclude Include="src\rhi\Texture.hpp">
+      <Filter>src\rhi</Filter>
+    </ClInclude>
+    <ClInclude Include="src\player\Camera.hpp">
+      <Filter>src\player</Filter>
+    </ClInclude>
+    <ClInclude Include="src\world\Cell.hpp">
+      <Filter>src\world</Filter>
+    </ClInclude>
+    <ClInclude Include="src\world\Coordinates.hpp">
+      <Filter>src\world</Filter>
+    </ClInclude>
+    <ClInclude Include="src\world\Chunk.hpp">
+      <Filter>src\world</Filter>
+    </ClInclude>
+    <ClInclude Include="src\world\ChunkMesher.hpp">
+      <Filter>src\world</Filter>
+    </ClInclude>
+    <ClInclude Include="src\world\TerrainGen.hpp">
+      <Filter>src\world</Filter>
+    </ClInclude>
+    <ClInclude Include="src\world\World.hpp">
+      <Filter>src\world</Filter>
+    </ClInclude>
+    <ClInclude Include="src\world\FallingBlockManager.hpp">
+      <Filter>src\world</Filter>
+    </ClInclude>
+    <ClInclude Include="src\player\Raycast.hpp">
+      <Filter>src\player</Filter>
+    </ClInclude>
+    <ClInclude Include="src\player\Player.hpp">
+      <Filter>src\player</Filter>
+    </ClInclude>
+    <ClInclude Include="src\renderer\TextureAtlas.hpp">
+      <Filter>src\renderer</Filter>
+    </ClInclude>
+    <ClInclude Include="src\renderer\HandRenderer.hpp">
+      <Filter>src\renderer</Filter>
+    </ClInclude>
+    <ClInclude Include="src\renderer\BlockOutlineRenderer.hpp">
+      <Filter>src\renderer</Filter>
+    </ClInclude>
+    <ClInclude Include="src\renderer\CelestialRenderer.hpp">
+      <Filter>src\renderer</Filter>
+    </ClInclude>
+    <ClInclude Include="src\renderer\ItemDropRenderer.hpp">
+      <Filter>src\renderer</Filter>
+    </ClInclude>
+    <ClInclude Include="src\renderer\BlockCrackRenderer.hpp">
+      <Filter>src\renderer</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\UIRenderer.hpp">
+      <Filter>src\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\MenuRenderer.hpp">
+      <Filter>src\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\ui\FontData.hpp">
+      <Filter>src\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="src\renderer\CloudRenderer.hpp">
+      <Filter>src\renderer</Filter>
+    </ClInclude>
+    <ClInclude Include="src\renderer\LightOverlayRenderer.hpp">
+      <Filter>src\renderer</Filter>
+    </ClInclude>
+    <ClInclude Include="src\game\Crafting.hpp">
+      <Filter>src\game</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="assets\shaders\cell.vert">
+      <Filter>assets\shaders</Filter>
+    </None>
+    <None Include="assets\shaders\cell.frag">
+      <Filter>assets\shaders</Filter>
+    </None>
+    <None Include="assets\shaders\water.frag">
+      <Filter>assets\shaders</Filter>
+    </None>
+    <None Include="assets\shaders\ui.vert">
+      <Filter>assets\shaders</Filter>
+    </None>
+    <None Include="assets\shaders\ui.frag">
+      <Filter>assets\shaders</Filter>
+    </None>
+  </ItemGroup>
+</Project>

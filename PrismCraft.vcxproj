@@ -1,0 +1,263 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <!-- Configurations -->
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+
+  <!-- Project Globals -->
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{5BCFC411-F4DF-4A84-80D1-1F9A0FA8B2F2}</ProjectGuid>
+    <RootNamespace>PrismCraft</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <Keyword>Win32Proj</Keyword>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+
+  <!-- Configuration Properties -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+
+  <!-- Debug Property Sheet -->
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props"
+            Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <!-- Release Property Sheet -->
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props"
+            Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+
+  <!-- Output Directories -->
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>$(SolutionDir)x64\$(Configuration)\</OutDir>
+    <IntDir>$(Configuration)\</IntDir>
+    <LinkIncremental>true</LinkIncremental>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(SolutionDir)x64\$(Configuration)\</OutDir>
+    <IntDir>$(Configuration)\</IntDir>
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+
+  <!-- Compile Settings: Debug -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)third_party;$(ProjectDir)third_party\glfw\include;$(ProjectDir)third_party\vma;$(VULKAN_SDK)\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>_DEBUG;VK_USE_PLATFORM_WIN32_KHR;NOMINMAX;WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS;GLM_FORCE_RADIANS;GLM_FORCE_DEPTH_ZERO_TO_ONE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib;$(ProjectDir)third_party\glfw\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+    <!-- Pre-Build: Compile shaders -->
+    <PreBuildEvent>
+      <Command>if not exist "$(OutDir)assets\shaders" mkdir "$(OutDir)assets\shaders"
+if not exist "$(OutDir)assets\textures" mkdir "$(OutDir)assets\textures"
+if not exist "$(OutDir)assets\sounds" mkdir "$(OutDir)assets\sounds"
+if not exist "$(OutDir)assets\music" mkdir "$(OutDir)assets\music"
+copy /Y "$(ProjectDir)assets\textures\*" "$(OutDir)assets\textures\" >nul 2>nul
+copy /Y "$(ProjectDir)assets\sounds\*" "$(OutDir)assets\sounds\" >nul 2>nul
+copy /Y "$(ProjectDir)assets\music\*" "$(OutDir)assets\music\" >nul 2>nul
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\cell.vert" -o "$(OutDir)assets\shaders\cell.vert.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\cell.frag" -o "$(OutDir)assets\shaders\cell.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\cloud.frag" -o "$(OutDir)assets\shaders\cloud.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\water.frag" -o "$(OutDir)assets\shaders\water.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\ui.vert" -o "$(OutDir)assets\shaders\ui.vert.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\ui.frag" -o "$(OutDir)assets\shaders\ui.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\csm_depth.vert" -o "$(OutDir)assets\shaders\csm_depth.vert.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\csm_depth.frag" -o "$(OutDir)assets\shaders\csm_depth.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\gbuffer.vert" -o "$(OutDir)assets\shaders\gbuffer.vert.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\gbuffer.frag" -o "$(OutDir)assets\shaders\gbuffer.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\fullscreen.vert" -o "$(OutDir)assets\shaders\fullscreen.vert.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\deferred_lighting.frag" -o "$(OutDir)assets\shaders\deferred_lighting.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\post_process.frag" -o "$(OutDir)assets\shaders\post_process.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\volumetric_fog.comp" -o "$(OutDir)assets\shaders\volumetric_fog.comp.spv"
+copy /Y "$(OutDir)assets\shaders\*.spv" "$(ProjectDir)assets\shaders\" >nul 2>nul</Command>
+      <Message>Compiling GLSL shaders to SPIR-V and syncing assets...</Message>
+    </PreBuildEvent>
+  </ItemDefinitionGroup>
+
+  <!-- Compile Settings: Release -->
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)third_party;$(ProjectDir)third_party\glfw\include;$(ProjectDir)third_party\vma;$(VULKAN_SDK)\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>NDEBUG;VK_USE_PLATFORM_WIN32_KHR;NOMINMAX;WIN32_LEAN_AND_MEAN;_CRT_SECURE_NO_WARNINGS;GLM_FORCE_RADIANS;GLM_FORCE_DEPTH_ZERO_TO_ONE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalOptions>/utf-8 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>vulkan-1.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(VULKAN_SDK)\Lib;$(ProjectDir)third_party\glfw\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
+    <!-- Pre-Build: Compile shaders -->
+    <PreBuildEvent>
+      <Command>if not exist "$(OutDir)assets\shaders" mkdir "$(OutDir)assets\shaders"
+if not exist "$(OutDir)assets\textures" mkdir "$(OutDir)assets\textures"
+if not exist "$(OutDir)assets\sounds" mkdir "$(OutDir)assets\sounds"
+if not exist "$(OutDir)assets\music" mkdir "$(OutDir)assets\music"
+copy /Y "$(ProjectDir)assets\textures\*" "$(OutDir)assets\textures\" >nul 2>nul
+copy /Y "$(ProjectDir)assets\sounds\*" "$(OutDir)assets\sounds\" >nul 2>nul
+copy /Y "$(ProjectDir)assets\music\*" "$(OutDir)assets\music\" >nul 2>nul
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\cell.vert" -o "$(OutDir)assets\shaders\cell.vert.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\cell.frag" -o "$(OutDir)assets\shaders\cell.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\cloud.frag" -o "$(OutDir)assets\shaders\cloud.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\water.frag" -o "$(OutDir)assets\shaders\water.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\ui.vert" -o "$(OutDir)assets\shaders\ui.vert.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\ui.frag" -o "$(OutDir)assets\shaders\ui.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\csm_depth.vert" -o "$(OutDir)assets\shaders\csm_depth.vert.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\csm_depth.frag" -o "$(OutDir)assets\shaders\csm_depth.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\gbuffer.vert" -o "$(OutDir)assets\shaders\gbuffer.vert.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\gbuffer.frag" -o "$(OutDir)assets\shaders\gbuffer.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\fullscreen.vert" -o "$(OutDir)assets\shaders\fullscreen.vert.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\deferred_lighting.frag" -o "$(OutDir)assets\shaders\deferred_lighting.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\post_process.frag" -o "$(OutDir)assets\shaders\post_process.frag.spv"
+"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\volumetric_fog.comp" -o "$(OutDir)assets\shaders\volumetric_fog.comp.spv"
+copy /Y "$(OutDir)assets\shaders\*.spv" "$(ProjectDir)assets\shaders\" >nul 2>nul</Command>
+      <Message>Compiling GLSL shaders to SPIR-V and syncing assets...</Message>
+    </PreBuildEvent>
+  </ItemDefinitionGroup>
+
+  <!-- Source Files (.cpp) -->
+  <ItemGroup>
+    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\core\Window.cpp" />
+    <ClCompile Include="src\core\Input.cpp" />
+    <ClCompile Include="src\core\ConfigManager.cpp" />
+    <ClCompile Include="src\audio\AudioEngine.cpp" />
+    <ClCompile Include="src\rhi\VulkanContext.cpp" />
+    <ClCompile Include="src\rhi\Swapchain.cpp" />
+    <ClCompile Include="src\rhi\CommandQueue.cpp" />
+    <ClCompile Include="src\rhi\Pipeline.cpp" />
+    <ClCompile Include="src\rhi\Buffer.cpp" />
+    <ClCompile Include="src\rhi\Texture.cpp" />
+    <ClCompile Include="src\rhi\VmaImpl.cpp" />
+    <ClCompile Include="src\player\Camera.cpp" />
+    <ClCompile Include="src\player\Raycast.cpp" />
+    <ClCompile Include="src\player\Player.cpp" />
+    <ClCompile Include="src\world\Chunk.cpp" />
+    <ClCompile Include="src\world\ChunkMesher.cpp" />
+    <ClCompile Include="src\world\TerrainGen.cpp" />
+    <ClCompile Include="src\world\World.cpp" />
+    <ClCompile Include="src\world\FallingBlockManager.cpp" />
+    <ClCompile Include="src\renderer\TextureAtlas.cpp" />
+    <ClCompile Include="src\renderer\HandRenderer.cpp" />
+    <ClCompile Include="src\renderer\BlockOutlineRenderer.cpp" />
+    <ClCompile Include="src\renderer\CelestialRenderer.cpp" />
+    <ClCompile Include="src\renderer\ItemDropRenderer.cpp" />
+    <ClCompile Include="src\renderer\BlockCrackRenderer.cpp" />
+    <ClCompile Include="src\renderer\PlayerModelRenderer.cpp" />
+    <ClCompile Include="src\ui\UIRenderer.cpp" />
+    <ClCompile Include="src\ui\MenuRenderer.cpp" />
+    <ClCompile Include="src\renderer\CloudRenderer.cpp" />
+    <ClCompile Include="src\renderer\LightOverlayRenderer.cpp" />
+    <ClCompile Include="src\game\Crafting.cpp" />
+    <ClCompile Include="src\game\ArrowManager.cpp" />
+  </ItemGroup>
+
+  <!-- Header Files (.hpp) -->
+  <ItemGroup>
+    <ClInclude Include="src\core\Window.hpp" />
+    <ClInclude Include="src\core\Input.hpp" />
+    <ClInclude Include="src\core\Timer.hpp" />
+    <ClInclude Include="src\core\ThreadPool.hpp" />
+    <ClInclude Include="src\core\GameOptions.hpp" />
+    <ClInclude Include="src\core\ConfigManager.hpp" />
+    <ClInclude Include="src\audio\AudioEngine.hpp" />
+    <ClInclude Include="src\rhi\RHICommon.hpp" />
+    <ClInclude Include="src\rhi\VulkanContext.hpp" />
+    <ClInclude Include="src\rhi\Swapchain.hpp" />
+    <ClInclude Include="src\rhi\CommandQueue.hpp" />
+    <ClInclude Include="src\rhi\Pipeline.hpp" />
+    <ClInclude Include="src\rhi\Buffer.hpp" />
+    <ClInclude Include="src\rhi\Texture.hpp" />
+    <ClInclude Include="src\rhi\TextureArray.hpp" />
+    <ClInclude Include="src\rhi\ShadowMap.hpp" />
+    <ClInclude Include="src\rhi\GBuffer.hpp" />
+    <ClInclude Include="src\player\Camera.hpp" />
+    <ClInclude Include="src\player\Raycast.hpp" />
+    <ClInclude Include="src\player\Player.hpp" />
+    <ClInclude Include="src\world\Cell.hpp" />
+    <ClInclude Include="src\world\Coordinates.hpp" />
+    <ClInclude Include="src\world\Chunk.hpp" />
+    <ClInclude Include="src\world\ChunkMesher.hpp" />
+    <ClInclude Include="src\world\TerrainGen.hpp" />
+    <ClInclude Include="src\world\World.hpp" />
+    <ClInclude Include="src\world\FallingBlockManager.hpp" />
+    <ClInclude Include="src\renderer\TextureAtlas.hpp" />
+    <ClInclude Include="src\renderer\PBRGenerator.hpp" />
+    <ClInclude Include="src\renderer\DeferredRenderer.hpp" />
+    <ClInclude Include="src\renderer\HandRenderer.hpp" />
+    <ClInclude Include="src\renderer\BlockOutlineRenderer.hpp" />
+    <ClInclude Include="src\renderer\CelestialRenderer.hpp" />
+    <ClInclude Include="src\renderer\ItemDropRenderer.hpp" />
+    <ClInclude Include="src\renderer\BlockCrackRenderer.hpp" />
+    <ClInclude Include="src\renderer\PlayerModelRenderer.hpp" />
+    <ClInclude Include="src\ui\UIRenderer.hpp" />
+    <ClInclude Include="src\ui\MenuRenderer.hpp" />
+    <ClInclude Include="src\ui\FontData.hpp" />
+    <ClInclude Include="src\renderer\CloudRenderer.hpp" />
+    <ClInclude Include="src\renderer\LightOverlayRenderer.hpp" />
+    <ClInclude Include="src\game\Crafting.hpp" />
+    <ClInclude Include="src\game\ArrowManager.hpp" />
+  </ItemGroup>
+
+  <!-- Shader Files -->
+  <ItemGroup>
+    <None Include="assets\shaders\cell.vert" />
+    <None Include="assets\shaders\cell.frag" />
+    <None Include="assets\shaders\cloud.frag" />
+    <None Include="assets\shaders\water.frag" />
+    <None Include="assets\shaders\ui.vert" />
+    <None Include="assets\shaders\ui.frag" />
+  </ItemGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+
+</Project>

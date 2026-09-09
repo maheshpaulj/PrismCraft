@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="PrismCraft.vcxproj" Id="5bcfc411-f4df-4a84-80d1-1f9a0fa8b2f2" />
+</Solution>
