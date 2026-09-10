@@ -332,141 +332,46 @@ float sampleCloudShadow(vec3 worldPos, vec3 L) {
 }
 
 // -------------------------------------------------------------
-// Volumetric Crepuscular God Rays (Light Shafts through clouds & trees)
+// Clean Horizon Distance Fog: Smoothly fades chunks into horizon at edge of render distance
 // -------------------------------------------------------------
-vec3 computeGodRays(vec3 rayOrigin, vec3 targetPos, vec3 L, float isDay, float goldenHour) {
-    vec3 rayDir = targetPos - rayOrigin;
-    float rayDist = length(rayDir);
-    if (rayDist < 4.0) return vec3(0.0);
-    rayDir /= rayDist;
-
-    float cosTheta = dot(rayDir, L);
-    // Early out if facing away from the sun or sun is down
-    if (cosTheta < 0.20 || isDay < 0.05 || L.y < 0.02) return vec3(0.0);
-
-    float phase = pow(max(cosTheta * 0.5 + 0.5, 0.0), 3.6) * 1.8 + 0.12;
-
-    vec3 goldenSun = vec3(1.85, 1.32, 0.68);
-    vec3 midDaySun = vec3(1.15, 1.08, 0.95);
-    vec3 activeSun = mix(midDaySun, goldenSun, goldenHour);
-
-    // 1. Sun Occlusion by Distant Mountains / LOD Hills (Tracing up to 450m)
-    float sunOcclusion = 1.0;
-    for (int s = 1; s <= 3; ++s) {
-        float testDist = float(s) * 150.0;
-        vec3 testP = rayOrigin + L * testDist;
-        float mountainY = getTerrainHeight(testP.xz);
-        if (testP.y < mountainY) {
-            float diff = mountainY - testP.y;
-            sunOcclusion = min(sunOcclusion, clamp(1.0 - diff * 0.25, 0.0, 1.0));
-        }
-    }
-    if (sunOcclusion <= 0.001) return vec3(0.0);
-
-    const int SAMPLES = 3;
-    float inscatterSum = 0.0;
-    float maxDist = min(rayDist, 160.0);
-
-    for (int i = 0; i < SAMPLES; ++i) {
-        float frac = (float(i) + 0.5) / float(SAMPLES);
-        float sampleDist = frac * maxDist;
-        vec3 p = rayOrigin + rayDir * sampleDist;
-
-        // A. Terrain/tree shadow at point p
-        int cascade = (sampleDist > shadowUBO.cascadeSplits.x) ? 1 : 0;
-        vec4 sc = shadowUBO.lightViewProj[cascade] * vec4(p, 1.0);
-        vec3 coords = sc.xyz / sc.w;
-        float shadow = 1.0;
-        if (coords.x >= 0.0 && coords.x <= 1.0 &&
-            coords.y >= 0.0 && coords.y <= 1.0 &&
-            coords.z >= 0.0 && coords.z <= 1.0) {
-            shadow = texture(shadowMap, vec4(coords.xy, float(cascade), coords.z - 0.002));
-        }
-
-        // B. Foliage gap dappling: tree leaf gaps let sunlight stream through branches
-        float leafGap = sin(p.x * 3.6 + p.y * 4.2) * cos(p.z * 3.6 + p.y * 3.1) * 0.5 + 0.5;
-        float leafDapple = smoothstep(0.32, 0.70, leafGap) * 0.75;
-        float effectiveShadow = max(shadow, leafDapple);
-
-        // C. Cloud shadow at point p
-        float cloudLight = sampleCloudShadow(p, L);
-
-        inscatterSum += effectiveShadow * cloudLight;
-    }
-
-    float shaftIntensity = inscatterSum / float(SAMPLES);
-    float distFade = smoothstep(6.0, 45.0, rayDist) * (1.0 - smoothstep(120.0, 260.0, rayDist) * 0.4);
-    float beamPower = (0.35 + goldenHour * 0.65) * isDay;
-
-    return activeSun * (shaftIntensity * phase * beamPower * distFade * sunOcclusion);
-}
-
-// -------------------------------------------------------------
-// Analytical Line Integral of Exponential Height Density Profile along 3D View Ray
-// -------------------------------------------------------------
-float integrateExponentialDensity(float camY, float fragY, float dist, float baseHeight, float scaleHeight) {
-    float deltaY = fragY - camY;
-    float normCamY = (camY - baseHeight) / scaleHeight;
-    float rhoCam = exp(-clamp(normCamY, -3.0, 8.0));
-    if (abs(deltaY) < 0.001) {
-        return rhoCam * dist;
-    }
-    float normDeltaY = deltaY / scaleHeight;
-    float integralFactor = (1.0 - exp(-clamp(normDeltaY, -8.0, 8.0))) / normDeltaY;
-    return rhoCam * dist * max(integralFactor, 0.0);
-}
-
-// -------------------------------------------------------------
-// Physically-Inspired Atmospheric Perspective & Directional Air-Light Scattering
-// -------------------------------------------------------------
-vec3 applyAtmosphericPerspective(vec3 surfaceColor, vec3 fragPos, vec3 camPos, vec3 L, vec3 skyFogColor, float isDay, float goldenHour, int optAtmosFog, float fogParamDensity, float fogEndDist) {
+vec3 applyHorizonDistanceFog(vec3 surfaceColor, vec3 fragPos, vec3 camPos, vec3 L, vec3 skyFogColor, float isDay, float goldenHour, int optAtmosFog, float fogEndDist) {
     vec3 rayDir = fragPos - camPos;
     float rayDist = length(rayDir);
     if (rayDist < 0.001) return surfaceColor;
     vec3 V = rayDir / rayDist;
 
-    // Tunable near threshold where atmospheric scattering begins (0 to 14m remains 100% crisp)
-    float fogStart = 14.0;
-    float effectiveDist = max(rayDist - fogStart, 0.0);
-    if (effectiveDist <= 0.0) return surfaceColor;
+    // Horizon fade start: 70% of render distance by default (55% if dense, 88% if off)
+    float startRatio = 0.70;
+    if (optAtmosFog == 0) startRatio = 0.88;
+    else if (optAtmosFog == 2) startRatio = 0.55;
 
-    // Tunable atmospheric density multiplier based on options and dayInfo
-    float densitySetting = (optAtmosFog == 0) ? 0.35 : ((optAtmosFog == 2) ? 1.60 : 1.00);
-    float userDensity = (fogParamDensity > 0.01) ? fogParamDensity : 1.0;
-    float totalDensityMult = densitySetting * userDensity;
+    float fogStart = fogEndDist * startRatio;
 
-    // Layer 1: Broad Tropospheric Planetary Air-Light (Continuous contrast reduction on distant terrain)
-    float opticalDepthRayleigh = integrateExponentialDensity(camPos.y, fragPos.y, effectiveDist, 62.0, 95.0) * (0.0035 * totalDensityMult);
-
-    // Layer 2: Low-Altitude Ground/Valley Haze (Soft aerial mist in lowlands and valleys)
-    float opticalDepthHaze = integrateExponentialDensity(camPos.y, fragPos.y, effectiveDist, 52.0, 26.0) * (0.0045 * totalDensityMult);
-
-    float totalTau = opticalDepthRayleigh + opticalDepthHaze;
-
-    // Horizon Chunk Boundary Dissolve (smoothly dissolves terrain into sky dome at the render distance edge)
-    float horizonDissolveStart = fogEndDist * 0.78;
-    if (rayDist > horizonDissolveStart) {
-        float hNorm = (rayDist - horizonDissolveStart) / max(fogEndDist - horizonDissolveStart, 1.0);
-        totalTau += pow(clamp(hNorm, 0.0, 1.0), 2.4) * 5.0;
+    // Everything closer than fogStart has ZERO fog: 100% crisp, vibrant, high-contrast nearby world!
+    if (rayDist <= fogStart) {
+        return surfaceColor;
     }
 
-    // Transmittance via Beer-Lambert extinction
-    float transmittance = exp(-totalTau);
+    // Smooth cubic Hermite interpolation between fogStart and fogEndDist
+    float fogNorm = clamp((rayDist - fogStart) / max(fogEndDist - fogStart, 1.0), 0.0, 1.0);
+    float fogFactor = smoothstep(0.0, 1.0, fogNorm);
 
-    // Directional In-Scattered Air-Light Color
+    // Directional In-Scattered Air-Light Color matching sky dome at horizon
     vec3 linearHorizonSky = srgbToLinear(skyFogColor);
-    // Upper zenith sky is deeper blue
     vec3 zenithSky = linearHorizonSky * vec3(0.68, 0.84, 1.22);
     vec3 baseAirLight = mix(linearHorizonSky, zenithSky, clamp(V.y * 0.55 + 0.15, 0.0, 1.0));
 
-    // Forward Solar Mie Scattering Phase Function (radiant golden haze when looking toward sun)
+    // Smooth forward solar warming without any hard cone cutoff or circle artifacts
     float cosTheta = dot(V, L);
-    float forwardPhase = pow(max(cosTheta * 0.5 + 0.5, 0.0), 3.6);
-    vec3 goldenHaze = mix(vec3(1.12, 1.04, 0.95), vec3(1.85, 1.30, 0.65), goldenHour);
-    vec3 inscatterRadiance = mix(baseAirLight, baseAirLight * goldenHaze, forwardPhase * 0.65 * isDay);
+    if (cosTheta > 0.0 && isDay > 0.05) {
+        float forwardPhase = pow(cosTheta, 4.0) * 0.35;
+        vec3 goldenHaze = mix(vec3(1.10, 1.04, 0.95), vec3(1.65, 1.25, 0.70), goldenHour);
+        baseAirLight = mix(baseAirLight, baseAirLight * goldenHaze, forwardPhase);
+    }
 
-    return mix(inscatterRadiance, surfaceColor, transmittance);
+    return mix(surfaceColor, baseAirLight, fogFactor);
 }
+
 
 void main() {
     // 1. Self-illuminated celestial bodies (Sun, Moon) & HUD overlays
@@ -665,7 +570,7 @@ void main() {
         linearSceneColor = mix(surfaceRadiance, vec3(0.005, 0.035, 0.12), uFactor);
         linearSceneColor = mix(linearSceneColor, vec3(0.005, 0.025, 0.08), 0.32);
     } else {
-        linearSceneColor = applyAtmosphericPerspective(
+        linearSceneColor = applyHorizonDistanceFog(
             surfaceRadiance,
             fragWorldPos,
             pc.camPos.xyz,
@@ -674,16 +579,10 @@ void main() {
             isDay,
             goldenHour,
             optAtmosFog,
-            pc.dayInfo.w,
             fogEnd
         );
     }
 
-    // Volumetric Crepuscular God Rays in linear space
-    if (vibrant && !cameraUnderwater) {
-        vec3 godRays = computeGodRays(pc.camPos.xyz, fragWorldPos, L, isDay, goldenHour);
-        linearSceneColor += godRays;
-    }
 
     // 9. Output linear HDR radiance directly to HDR buffer (master tonemapping handled in post-processing pass)
     outColor = vec4(linearSceneColor, texSample.a);
