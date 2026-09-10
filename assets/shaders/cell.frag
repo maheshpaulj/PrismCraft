@@ -66,6 +66,7 @@ vec3 getTorchGlow(float dist, float maxDist, bool vibrant, bool optTorchColorBle
 
 // Real-Time Dynamic Light Shadow: Player body casts shadow from held torch
 float computePlayerTorchOcclusion(vec3 fragPos, vec3 torchPos, vec3 playerPos) {
+    if (length(fragPos - torchPos) < 0.65) return 1.0; // Held torch and player hand are never self-occluded!
     vec3 rayDir = fragPos - torchPos;
     float rayLen = length(rayDir);
     if (rayLen < 0.1) return 1.0;
@@ -171,20 +172,62 @@ float sampleRealtimeShadow(vec3 worldPos, vec3 N, vec3 L) {
 }
 
 // -------------------------------------------------------------
+// Fast 2D OpenSimplex-like Noise & Terrain Height (Matching TerrainGen.cpp)
+// -------------------------------------------------------------
+vec2 hash2D(vec2 p) {
+    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+    return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+}
+
+float terrainNoise2D(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(dot(hash2D(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0)),
+                   dot(hash2D(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0)), u.x),
+               mix(dot(hash2D(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)),
+                   dot(hash2D(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x), u.y);
+}
+
+float getTerrainHeight(vec2 worldXZ) {
+    vec2 p = vec2(worldXZ.x, worldXZ.y * 0.8660254);
+    float cont = terrainNoise2D(p * 0.0035);
+    float det  = terrainNoise2D(p * 0.015 + vec2(10.1, 15.3));
+    float h = 52.0;
+    if (cont < -0.30) {
+        float t = (-cont - 0.30) / 0.70;
+        h = 42.0 - t * 14.0 + det * 2.0;
+    } else if (cont < -0.15) {
+        float t = (cont + 0.30) / 0.15;
+        h = 43.0 + t * 7.0 + det * 1.5;
+    } else if (cont <= 0.45) {
+        float t = (cont + 0.15) / 0.60;
+        h = 50.5 + t * 3.0 + det * 2.0;
+    } else if (cont <= 0.75) {
+        float t = (cont - 0.45) / 0.30;
+        h = 54.0 + t * 16.0 + det * 4.0;
+    } else {
+        float t = (cont - 0.75) / 0.25;
+        h = 70.0 + t * 24.0 + det * 6.0;
+    }
+    return h;
+}
+
+// -------------------------------------------------------------
 // Dynamic Cloud Shadowing matching 3D sky cumulus clusters
 // -------------------------------------------------------------
 float sampleCloudShadow(vec3 worldPos, vec3 L) {
     if (L.y <= 0.02) return 1.0;
-    float tCloud = (235.0 - worldPos.y) / L.y;
+    float tCloud = (196.0 - worldPos.y) / L.y;
     if (tCloud <= 0.0) return 1.0;
     vec2 cloudHit = worldPos.xz + L.xz * tCloud;
     vec2 wind = vec2(pc.camPos.w * 2.0, 0.0);
     vec2 ws = cloudHit + wind;
 
-    // Macro cluster coordinate matching cloud.frag: 0.00078
-    vec2 pMacro = ws * 0.00078;
+    // Macro cluster coordinate matching cloud.frag: 0.00025
+    vec2 pMacro = ws * 0.00025;
     float macro = sin(pMacro.x * 3.14 + cos(pMacro.y * 2.5)) * cos(pMacro.y * 3.14) * 0.5 + 0.5;
-    float coverage = smoothstep(0.44, 0.62, macro);
+    float coverage = smoothstep(0.42, 0.65, macro);
     return 1.0 - coverage * 0.65;
 }
 
@@ -204,16 +247,16 @@ vec3 computeGodRays(vec3 rayOrigin, vec3 targetPos, vec3 L, float isDay, float g
     vec3 midDaySun = vec3(1.15, 1.08, 0.95);
     vec3 activeSun = mix(midDaySun, goldenSun, goldenHour);
 
-    // 1. Sun Occlusion by Distant Mountains / LOD Hills
+    // 1. Sun Occlusion by Distant Mountains / LOD Hills (Tracing up to 750m)
     float sunOcclusion = 1.0;
     if (L.y > 0.02) {
-        for (int s = 1; s <= 5; ++s) {
-            float testDist = float(s) * 48.0;
+        for (int s = 1; s <= 10; ++s) {
+            float testDist = float(s) * 75.0;
             vec3 testP = rayOrigin + L * testDist;
-            float mountainY = 56.0 + 34.0 * sin(testP.x * 0.0075) * cos(testP.z * 0.0075 + 0.4) + 12.0 * sin(testP.x * 0.016);
+            float mountainY = getTerrainHeight(testP.xz);
             if (testP.y < mountainY) {
                 float diff = mountainY - testP.y;
-                sunOcclusion = min(sunOcclusion, clamp(1.0 - diff * 0.18, 0.0, 1.0));
+                sunOcclusion = min(sunOcclusion, clamp(1.0 - diff * 0.25, 0.0, 1.0));
             }
         }
     }
@@ -302,6 +345,17 @@ void main() {
     }
 
     float combinedShadow = min(rtShadow, blockShadow);
+
+    // Tree canopy daylight transmission & soft ambient bounce:
+    // Outdoor surfaces under tree canopies (blockShadow >= 0.35) receive filtered daylight and soft bounce
+    float outdoorCanopy = smoothstep(0.20, 0.55, blockShadow) * isDay;
+    if (outdoorCanopy > 0.01 && combinedShadow < 0.32) {
+        // Dappled foliage light passing through tree leaf clusters
+        float leafNoise = sin(fragWorldPos.x * 2.8 + fragWorldPos.y * 3.4) * cos(fragWorldPos.z * 2.8 + fragWorldPos.y * 2.2) * 0.5 + 0.5;
+        float dappledLight = mix(0.20, 0.36, leafNoise);
+        combinedShadow = mix(combinedShadow, dappledLight, outdoorCanopy * (1.0 - combinedShadow));
+    }
+
     float directFactor = max(NdotL, 0.0) * combinedShadow * sunIntensity;
 
     // Dynamic Cloud Shadows on Terrain: Synchronized 1:1 with sky clouds
@@ -331,8 +385,9 @@ void main() {
 
     float ssaoFactor = pow(smoothLighting, 1.3);
     // Daytime ambient sky bounce stays pleasantly soft under trees and cliffs, only decaying in deep closed caves
-    float skyOcc = mix(0.48 * smoothstep(0.02, 0.18, blockShadow), 1.0, blockShadow);
-    ambientLight *= skyOcc * (0.35 + 0.65 * ssaoFactor);
+    float skyOcc = mix(0.58 * smoothstep(0.02, 0.18, blockShadow), 1.0, clamp(blockShadow * 1.15, 0.0, 1.0));
+    vec3 foliageBounce = vec3(0.06, 0.12, 0.04) * (outdoorCanopy * (1.0 - combinedShadow));
+    ambientLight = ambientLight * skyOcc * (0.42 + 0.58 * ssaoFactor) + foliageBounce;
     celestialLightColor *= (0.35 + 0.65 * smoothLighting);
 
     // 4. Dynamic Point Lights with Real-Time Shadows (Torches)
@@ -346,13 +401,13 @@ void main() {
             float atten = clamp(1.0 - dist / 15.0, 0.0, 1.0);
             atten = atten * atten;
             vec3 torchDir = toTorch / max(dist, 0.001);
-            float NdotT = dot(N, torchDir);
+            float NdotT = (dist < 0.65) ? max(dot(N, torchDir) * 0.5 + 0.65, 0.45) : max(dot(N, torchDir), 0.0);
             if (NdotT > 0.0) {
                 float playerOcc = computePlayerTorchOcclusion(fragWorldPos, pc.heldTorch.xyz, pc.playerPos.xyz);
-                float blockOcc = (vibrant && optShadowQuality > 0) ? sampleTorchBlockOcclusion(fragWorldPos, pc.heldTorch.xyz) : 1.0;
+                float blockOcc = (vibrant && optShadowQuality > 0 && dist >= 0.65) ? sampleTorchBlockOcclusion(fragWorldPos, pc.heldTorch.xyz) : 1.0;
                 float torchShadow = playerOcc * blockOcc;
                 vec3 tCol = getTorchGlow(dist, 15.0, vibrant, optTorchColorBleed);
-                torchLight += tCol * (atten * NdotT * 2.8 * smoothLighting * torchShadow);
+                torchLight += tCol * (atten * NdotT * 3.2 * smoothLighting * torchShadow);
             }
         }
     }
@@ -386,15 +441,33 @@ void main() {
     vec3 totalLight = ambientLight + celestialLightColor + torchLight;
     vec3 litColor = tex.rgb * totalLight;
 
-    // 6. Dynamic Seabed Caustics (Submerged surfaces under water)
+    // 6. Water Column Beer-Lambert Absorption & Seabed Caustics (Submerged surfaces under water)
     if (isSubmerged) {
+        // Depth below water surface (sea level at Y=44.5)
+        float waterDepth = max(44.5 - fragWorldPos.y, 0.4);
+
+        // Beer-Lambert wavelength-dependent light extinction:
+        // Red light attenuates 6x faster than blue, producing authentic deep aquatic cyan/navy falloff
+        vec3 waterAbsorption = vec3(0.26, 0.09, 0.038);
+        vec3 beerTransmittance = exp(-waterDepth * waterAbsorption);
+
+        // Attenuate light reaching the seabed
+        litColor *= beerTransmittance;
+
+        // Inscatter / water column scattering shifts submerged blocks towards the water's deep aquatic tint
+        vec3 deepWaterTint = mix(vec3(0.008, 0.024, 0.055), vec3(0.018, 0.068, 0.15), isDay);
+        float depthFog = 1.0 - exp(-waterDepth * 0.16);
+        litColor = mix(litColor, deepWaterTint, depthFog * 0.72);
+
+        // Dynamic Seabed Caustics (sharply focused in shallows, fading with depth)
         float t = pc.camPos.w * 2.0;
         vec2 p = fragWorldPos.xz;
         float c1 = sin(p.x * 2.4 + t * 1.5) * sin(p.y * 2.4 + t * 1.2);
         float c2 = sin(p.x * 4.8 - t * 1.8 + p.y * 2.6) * cos(p.y * 4.8 + t * 1.5);
         float caustic = pow(clamp(c1 * 0.5 + c2 * 0.5 + 0.5, 0.0, 1.0), 3.0);
         vec3 causticColor = mix(vec3(0.12, 0.35, 0.60), vec3(1.05, 0.98, 0.75), isDay);
-        litColor += caustic * 0.18 * blockShadow * max(sunIntensity, 0.20) * causticColor;
+        float causticFade = exp(-waterDepth * 0.28);
+        litColor += caustic * 0.22 * blockShadow * max(sunIntensity, 0.20) * causticColor * causticFade;
     }
 
     // 7. Atmospheric Distance Fog & Golden Hour Scattering

@@ -21,6 +21,7 @@ struct GameOptions {
     float fogFalloff = 0.85f;      // 0.65f: Dense Mist, 0.85f: Atmospheric, 1.0f: Clear Sky
     bool clouds = true;
     bool cloudShadows = true;
+    int cloudSeed = 1337;          // Deterministic seed for baked volumetric cloud map
     bool vibrantVisuals = true;    // Bedrock RTX-Style Vibrant Visuals Shaders
     int shadowQuality = 2;         // 0: Off, 1: Low, 2: Medium, 3: High
     int shadowDistance = 1;        // 0: Near (48m), 1: Medium (80m), 2: Far (120m), 3: Ultra (160m)

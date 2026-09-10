@@ -234,7 +234,7 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
             glm::vec3 probePos(V.x + cosSin6[i][0] * 0.35f, static_cast<float>(y) + 1.25f, V.z + cosSin6[i][1] * 0.35f);
             CellCoord sc = worldToCell(probePos);
             Cell scell = getCellAtWorld(sc.x, sc.y, sc.z, sc.s);
-            if (scell.isOpaque() || scell.type == BlockType::Leaves) {
+            if (scell.isOpaque() && scell.type != BlockType::Leaves) {
                 occluded++;
             }
         }
@@ -260,7 +260,7 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
             glm::vec3 probePos(V.x + cosSin6[i][0] * 0.35f, static_cast<float>(y) - 0.25f, V.z + cosSin6[i][1] * 0.35f);
             CellCoord sc = worldToCell(probePos);
             Cell scell = getCellAtWorld(sc.x, sc.y, sc.z, sc.s);
-            if (scell.isOpaque() || scell.type == BlockType::Leaves) {
+            if (scell.isOpaque() && scell.type != BlockType::Leaves) {
                 occluded++;
             }
         }
@@ -279,17 +279,17 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
         // Test vertical contact (floor or ceiling)
         glm::vec3 vertProbe = Pout + glm::vec3(0.0f, isBottom ? -0.4f : 0.4f, 0.0f);
         Cell scVert = getCellAtWorld(worldToCell(vertProbe).x, worldToCell(vertProbe).y, worldToCell(vertProbe).z, worldToCell(vertProbe).s);
-        if (scVert.isOpaque() || scVert.type == BlockType::Leaves) occluded++;
+        if (scVert.isOpaque() && scVert.type != BlockType::Leaves) occluded++;
 
         // Test lateral corner seam
         glm::vec3 latProbe = Pout + tang * (lateralSign * 0.38f);
         Cell scLat = getCellAtWorld(worldToCell(latProbe).x, worldToCell(latProbe).y, worldToCell(latProbe).z, worldToCell(latProbe).s);
-        if (scLat.isOpaque() || scLat.type == BlockType::Leaves) occluded++;
+        if (scLat.isOpaque() && scLat.type != BlockType::Leaves) occluded++;
 
         // Test diagonal corner
         glm::vec3 diagProbe = Pout + tang * (lateralSign * 0.38f) + glm::vec3(0.0f, isBottom ? -0.4f : 0.4f, 0.0f);
         Cell scDiag = getCellAtWorld(worldToCell(diagProbe).x, worldToCell(diagProbe).y, worldToCell(diagProbe).z, worldToCell(diagProbe).s);
-        if (scDiag.isOpaque() || scDiag.type == BlockType::Leaves) occluded++;
+        if (scDiag.isOpaque() && scDiag.type != BlockType::Leaves) occluded++;
 
         if (occluded == 0) return 1.00f;
         if (occluded == 1) return 0.78f;

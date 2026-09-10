@@ -641,9 +641,15 @@ void World::getLightLevels(int worldX, int y, int worldZ, int s, int& skyLight, 
             for (int sy = y + 1; sy < CHUNK_SIZE_Y; ++sy) {
                 Cell c0 = chunk->getCell(localX, sy, localZ, 0);
                 Cell c1 = chunk->getCell(localX, sy, localZ, 1);
-                if (c0.isOpaque() || c1.isOpaque() || c0.type == BlockType::Leaves || c1.type == BlockType::Leaves) {
+                bool isSolid = (c0.isOpaque() && c0.type != BlockType::Leaves) || (c1.isOpaque() && c1.type != BlockType::Leaves);
+                bool isLeaf = (c0.type == BlockType::Leaves || c1.type == BlockType::Leaves);
+                if (isSolid) {
                     int depth = sy - y;
                     skyLight = std::max(0, 15 - depth * 2);
+                    break;
+                } else if (isLeaf) {
+                    int depth = sy - y;
+                    skyLight = std::max(12, 15 - depth); // Leaves allow abundant daylight through
                     break;
                 }
             }

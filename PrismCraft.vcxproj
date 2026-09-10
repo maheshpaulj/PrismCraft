@@ -201,6 +201,7 @@ copy /Y "$(OutDir)assets\shaders\*.spv" "$(ProjectDir)assets\shaders\" >nul 2>nu
     <ClCompile Include="src\renderer\LightOverlayRenderer.cpp" />
     <ClCompile Include="src\game\Crafting.cpp" />
     <ClCompile Include="src\game\ArrowManager.cpp" />
+    <ClCompile Include="src\renderer\CloudMapGenerator.cpp" />
   </ItemGroup>
 
   <!-- Header Files (.hpp) -->
@@ -248,6 +249,7 @@ copy /Y "$(OutDir)assets\shaders\*.spv" "$(ProjectDir)assets\shaders\" >nul 2>nu
     <ClInclude Include="src\renderer\LightOverlayRenderer.hpp" />
     <ClInclude Include="src\game\Crafting.hpp" />
     <ClInclude Include="src\game\ArrowManager.hpp" />
+    <ClInclude Include="src\renderer\CloudMapGenerator.hpp" />
   </ItemGroup>
 
   <!-- Shader Files -->

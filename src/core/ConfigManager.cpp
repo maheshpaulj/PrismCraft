@@ -45,11 +45,12 @@ bool ConfigManager::load(GameOptions& options, const std::string& filePath) {
             else if (key == "resIndex") options.resIndex = std::clamp(std::stoi(val), 0, 3);
             else if (key == "maxFps") options.maxFps = std::stoi(val);
             else if (key == "vsync") options.vsync = (val == "1" || val == "true" || val == "True");
-            else if (key == "renderDistance") options.renderDistance = std::clamp(std::stoi(val), 4, 256);
+            else if (key == "renderDistance") options.renderDistance = std::clamp(std::stoi(val), 4, 24);
             else if (key == "lodPreset") options.lodPreset = std::clamp(std::stoi(val), 0, 3);
             else if (key == "fogFalloff") options.fogFalloff = std::clamp(std::stof(val), 0.5f, 1.2f);
             else if (key == "clouds") options.clouds = (val == "1" || val == "true" || val == "True");
             else if (key == "cloudShadows") options.cloudShadows = (val == "1" || val == "true" || val == "True");
+            else if (key == "cloudSeed") options.cloudSeed = std::stoi(val);
             else if (key == "vibrantVisuals") options.vibrantVisuals = (val == "1" || val == "true" || val == "True");
             else if (key == "shadowQuality") options.shadowQuality = std::clamp(std::stoi(val), 0, 3);
             else if (key == "shadowDistance") options.shadowDistance = std::clamp(std::stoi(val), 0, 3);
@@ -97,6 +98,7 @@ bool ConfigManager::save(const GameOptions& options, const std::string& filePath
     file << "fogFalloff=" << options.fogFalloff << "\n";
     file << "clouds=" << (options.clouds ? 1 : 0) << "\n";
     file << "cloudShadows=" << (options.cloudShadows ? 1 : 0) << "\n";
+    file << "cloudSeed=" << options.cloudSeed << "\n";
     file << "vibrantVisuals=" << (options.vibrantVisuals ? 1 : 0) << "\n";
     file << "shadowQuality=" << options.shadowQuality << "\n";
     file << "shadowDistance=" << options.shadowDistance << "\n";

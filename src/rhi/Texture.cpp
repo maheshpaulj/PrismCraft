@@ -7,7 +7,7 @@
 
 namespace prismcraft {
 
-Texture::Texture(VulkanContext& context, CommandQueue& cmdQueue, uint32_t width, uint32_t height, const uint8_t* rgbaPixels)
+Texture::Texture(VulkanContext& context, CommandQueue& cmdQueue, uint32_t width, uint32_t height, const uint8_t* rgbaPixels, bool linearFilter)
     : m_context(context) {
 
     VkDeviceSize imageSize = width * height * 4;
@@ -116,11 +116,11 @@ Texture::Texture(VulkanContext& context, CommandQueue& cmdQueue, uint32_t width,
     VK_CHECK(vkCreateImageView(m_context.getDevice(), &viewInfo, nullptr, &m_imageView),
              "Failed to create texture image view!");
 
-    // 5. Create Sampler (Nearest-neighbor for pixel art!)
+    // 5. Create Sampler (Linear for noise/clouds, Nearest for pixel art!)
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_NEAREST;
-    samplerInfo.minFilter = VK_FILTER_NEAREST;
+    samplerInfo.magFilter = linearFilter ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+    samplerInfo.minFilter = linearFilter ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
     samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
@@ -129,7 +129,7 @@ Texture::Texture(VulkanContext& context, CommandQueue& cmdQueue, uint32_t width,
     samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
     samplerInfo.unnormalizedCoordinates = VK_FALSE;
     samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    samplerInfo.mipmapMode = linearFilter ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
 
     VK_CHECK(vkCreateSampler(m_context.getDevice(), &samplerInfo, nullptr, &m_sampler),
              "Failed to create texture sampler!");

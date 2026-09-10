@@ -9,7 +9,7 @@ class CommandQueue;
 
 class Texture {
 public:
-    Texture(VulkanContext& context, CommandQueue& cmdQueue, uint32_t width, uint32_t height, const uint8_t* rgbaPixels);
+    Texture(VulkanContext& context, CommandQueue& cmdQueue, uint32_t width, uint32_t height, const uint8_t* rgbaPixels, bool linearFilter = false);
     ~Texture();
 
     Texture(const Texture&) = delete;

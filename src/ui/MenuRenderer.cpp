@@ -328,10 +328,10 @@ int MenuRenderer::handleClick(GameState& state, Player& player, glm::vec2 mouseP
         // Row 1: RENDER DISTANCE (toggle, left) | MAX FPS (toggle, right)
         if (inBox(lx, y0 + dy, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
-            static const int rdList[] = {4, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256};
-            int curIdx = 3;
-            for (int k = 0; k < 12; ++k) { if (rdList[k] == options.renderDistance) { curIdx = k; break; } }
-            options.renderDistance = rdList[(curIdx + 1) % 12];
+            static const int rdList[] = {4, 6, 8, 10, 12, 14, 16, 20, 24};
+            int curIdx = 2;
+            for (int k = 0; k < 9; ++k) { if (rdList[k] == options.renderDistance) { curIdx = k; break; } }
+            options.renderDistance = rdList[(curIdx + 1) % 9];
             return 17;
         }
         if (inBox(rx, y0 + dy, bW, bH) && !isDown) {
@@ -364,7 +364,10 @@ int MenuRenderer::handleClick(GameState& state, Player& player, glm::vec2 mouseP
         }
         if (inBox(rx, y0 + dy * 3.0f, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
-            options.cloudShadows = !options.cloudShadows;
+            static const int seedList[] = {1337, 42, 101, 777, 2026, 9999};
+            int curIdx = 0;
+            for (int k = 0; k < 6; ++k) { if (seedList[k] == options.cloudSeed) { curIdx = k; break; } }
+            options.cloudSeed = seedList[(curIdx + 1) % 6];
             return 27;
         }
 
@@ -1155,7 +1158,7 @@ void MenuRenderer::rebuildMenuMesh(GameState state, const Player& player, uint32
 
         // Row 1: RENDER DISTANCE | MAX FPS
         char rdBuf[64];
-        std::snprintf(rdBuf, sizeof(rdBuf), "RENDER DIST: %d CHUNKS", options.renderDistance);
+        std::snprintf(rdBuf, sizeof(rdBuf), "TERRAIN CHUNKS: %d", options.renderDistance);
         addRectButton(lx, y0 + dy, bW, bH, rdBuf, inBox(lx, y0 + dy, bW, bH), true);
 
         char fpsBuf[64];
@@ -1170,12 +1173,13 @@ void MenuRenderer::rebuildMenuMesh(GameState state, const Player& player, uint32
         const char* gradeNames[] = {"COLOR: DEFAULT", "COLOR: CINEMATIC", "COLOR: VIBRANT", "COLOR: WARM", "COLOR: COOL"};
         addRectButton(rx, y0 + dy * 2.0f, bW, bH, gradeNames[std::clamp(options.colorGrading, 0, 4)], inBox(rx, y0 + dy * 2.0f, bW, bH), options.colorGrading > 0);
 
-        // Row 3: CLOUDS 3D | CLOUD SHADOWS
+        // Row 3: CLOUDS 3D | CLOUD SEED
         std::string cloudStr = options.clouds ? "CLOUDS: VOLUMETRIC 3D" : "CLOUDS: OFF";
         addRectButton(lx, y0 + dy * 3.0f, bW, bH, cloudStr, inBox(lx, y0 + dy * 3.0f, bW, bH), options.clouds);
 
-        std::string cShadowStr = options.cloudShadows ? "CLOUD SHADOWS: ON" : "CLOUD SHADOWS: OFF";
-        addRectButton(rx, y0 + dy * 3.0f, bW, bH, cShadowStr, inBox(rx, y0 + dy * 3.0f, bW, bH), options.cloudShadows);
+        char cSeedBuf[64];
+        std::snprintf(cSeedBuf, sizeof(cSeedBuf), "CLOUD SEED: %d", options.cloudSeed);
+        addRectButton(rx, y0 + dy * 3.0f, bW, bH, cSeedBuf, inBox(rx, y0 + dy * 3.0f, bW, bH), true);
 
         // Row 4: SMOOTH LIGHTING / SSAO | STEVE SHADOW
         std::string aoStr = options.smoothLighting ? "SMOOTH LIGHT / SSAO: ON" : "SMOOTH LIGHT: OFF";

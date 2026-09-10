@@ -180,16 +180,19 @@ void PlayerModelRenderer::buildModelMesh(const Player& player, float skylight, f
                         TextureAtlas::TILE_STEVE_TORSO_BACK,
                         vertColor);
 
-    glm::vec3 headPivot = crouching ? glm::vec3(0.0f, 1.34f, 0.12f) : glm::vec3(0.0f, 1.40f, 0.0f);
-    glm::mat4 headMat = playerBase *
-                        glm::translate(glm::mat4(1.0f), headPivot) *
-                        glm::rotate(glm::mat4(1.0f), -pitch + (crouching ? glm::radians(-15.0f) : 0.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-    addEquilateralPrism(vertices, indices, headMat, 0.48f, 0.44f,
-                        TextureAtlas::TILE_STEVE_HEAD_FRONT,
-                        TextureAtlas::TILE_STEVE_HEAD_SIDE,
-                        TextureAtlas::TILE_STEVE_HEAD_TOP,
-                        TextureAtlas::TILE_STEVE_SKIN_TONE,
-                        vertColor);
+    bool isFirstPerson = (player.getCamera().getMode() == CameraMode::FirstPerson);
+    if (!isFirstPerson) {
+        glm::vec3 headPivot = crouching ? glm::vec3(0.0f, 1.34f, 0.12f) : glm::vec3(0.0f, 1.40f, 0.0f);
+        glm::mat4 headMat = playerBase *
+                            glm::translate(glm::mat4(1.0f), headPivot) *
+                            glm::rotate(glm::mat4(1.0f), -pitch + (crouching ? glm::radians(-15.0f) : 0.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        addEquilateralPrism(vertices, indices, headMat, 0.48f, 0.44f,
+                            TextureAtlas::TILE_STEVE_HEAD_FRONT,
+                            TextureAtlas::TILE_STEVE_HEAD_SIDE,
+                            TextureAtlas::TILE_STEVE_HEAD_TOP,
+                            TextureAtlas::TILE_STEVE_SKIN_TONE,
+                            vertColor);
+    }
 
     glm::vec3 lShoulderPivot = crouching ? glm::vec3(0.34f, 1.32f, 0.02f) : glm::vec3(0.34f, 1.36f, 0.04f);
     glm::mat4 lArmMat = playerBase *

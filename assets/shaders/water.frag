@@ -106,20 +106,62 @@ float sampleRealtimeShadow(vec3 worldPos, vec3 N, vec3 L) {
 }
 
 // -------------------------------------------------------------
+// Fast 2D OpenSimplex-like Noise & Terrain Height (Matching TerrainGen.cpp)
+// -------------------------------------------------------------
+vec2 hash2D(vec2 p) {
+    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+    return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
+}
+
+float terrainNoise2D(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(dot(hash2D(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0)),
+                   dot(hash2D(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0)), u.x),
+               mix(dot(hash2D(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)),
+                   dot(hash2D(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x), u.y);
+}
+
+float getTerrainHeight(vec2 worldXZ) {
+    vec2 p = vec2(worldXZ.x, worldXZ.y * 0.8660254);
+    float cont = terrainNoise2D(p * 0.0035);
+    float det  = terrainNoise2D(p * 0.015 + vec2(10.1, 15.3));
+    float h = 52.0;
+    if (cont < -0.30) {
+        float t = (-cont - 0.30) / 0.70;
+        h = 42.0 - t * 14.0 + det * 2.0;
+    } else if (cont < -0.15) {
+        float t = (cont + 0.30) / 0.15;
+        h = 43.0 + t * 7.0 + det * 1.5;
+    } else if (cont <= 0.45) {
+        float t = (cont + 0.15) / 0.60;
+        h = 50.5 + t * 3.0 + det * 2.0;
+    } else if (cont <= 0.75) {
+        float t = (cont - 0.45) / 0.30;
+        h = 54.0 + t * 16.0 + det * 4.0;
+    } else {
+        float t = (cont - 0.75) / 0.25;
+        h = 70.0 + t * 24.0 + det * 6.0;
+    }
+    return h;
+}
+
+// -------------------------------------------------------------
 // Dynamic Cloud Shadowing matching 3D sky cumulus clusters
 // -------------------------------------------------------------
 float sampleCloudShadow(vec3 worldPos, vec3 L) {
     if (L.y <= 0.02) return 1.0;
-    float tCloud = (235.0 - worldPos.y) / L.y;
+    float tCloud = (196.0 - worldPos.y) / L.y;
     if (tCloud <= 0.0) return 1.0;
     vec2 cloudHit = worldPos.xz + L.xz * tCloud;
     vec2 wind = vec2(pc.camPos.w * 2.0, 0.0);
     vec2 ws = cloudHit + wind;
 
-    // Macro cluster coordinate matching cloud.frag: 0.00078
-    vec2 pMacro = ws * 0.00078;
+    // Macro cluster coordinate matching cloud.frag: 0.00025
+    vec2 pMacro = ws * 0.00025;
     float macro = sin(pMacro.x * 3.14 + cos(pMacro.y * 2.5)) * cos(pMacro.y * 3.14) * 0.5 + 0.5;
-    float coverage = smoothstep(0.44, 0.62, macro);
+    float coverage = smoothstep(0.42, 0.65, macro);
     return 1.0 - coverage * 0.65;
 }
 
@@ -139,16 +181,16 @@ vec3 computeGodRays(vec3 rayOrigin, vec3 targetPos, vec3 L, float isDay, float g
     vec3 midDaySun = vec3(1.15, 1.08, 0.95);
     vec3 activeSun = mix(midDaySun, goldenSun, goldenHour);
 
-    // 1. Sun Occlusion by Distant Mountains / LOD Hills
+    // 1. Sun Occlusion by Distant Mountains / LOD Hills (Tracing up to 750m)
     float sunOcclusion = 1.0;
     if (L.y > 0.02) {
-        for (int s = 1; s <= 5; ++s) {
-            float testDist = float(s) * 48.0;
+        for (int s = 1; s <= 10; ++s) {
+            float testDist = float(s) * 75.0;
             vec3 testP = rayOrigin + L * testDist;
-            float mountainY = 56.0 + 34.0 * sin(testP.x * 0.0075) * cos(testP.z * 0.0075 + 0.4) + 12.0 * sin(testP.x * 0.016);
+            float mountainY = getTerrainHeight(testP.xz);
             if (testP.y < mountainY) {
                 float diff = mountainY - testP.y;
-                sunOcclusion = min(sunOcclusion, clamp(1.0 - diff * 0.18, 0.0, 1.0));
+                sunOcclusion = min(sunOcclusion, clamp(1.0 - diff * 0.25, 0.0, 1.0));
             }
         }
     }
@@ -207,7 +249,7 @@ vec3 traceSceneReflection(vec3 origin, vec3 R, vec3 L, float isDay, float sunInt
 
     // 2. Reflected 3D Volumetric Cotton Candy Clouds in the sky
     if (R.y > 0.015 && waterQuality >= 1) {
-        float tCloud = (235.0 - origin.y) / max(R.y, 0.02);
+        float tCloud = (196.0 - origin.y) / max(R.y, 0.02);
         if (tCloud > 0.0 && tCloud < 6500.0) {
             vec3 pCloud = origin + R * tCloud;
             vec2 wind = vec2(pc.camPos.w * 2.0, 0.0);
@@ -217,10 +259,10 @@ vec3 traceSceneReflection(vec3 origin, vec3 R, vec3 L, float isDay, float sunInt
             float dH = length(pCloud.xz - pc.camPos.xz);
             float yCurv = pCloud.y + (dH * dH) / (2.0 * 90000.0);
 
-            if (yCurv >= 230.0 && yCurv <= 395.0) {
-                float macroNoise = cloudFBM(ws * 0.00072);
-                if (macroNoise > 0.43) {
-                    float cDensity = smoothstep(0.43, 0.65, macroNoise);
+            if (yCurv >= 196.0 && yCurv <= 330.0) {
+                float macroNoise = cloudFBM(ws * 0.00025);
+                if (macroNoise > 0.42) {
+                    float cDensity = smoothstep(0.42, 0.65, macroNoise);
                     if (cDensity > 0.0) {
                         float cAlpha = clamp(cDensity * 1.6, 0.0, 1.0);
                         float cosTh = dot(R, L);
@@ -239,11 +281,11 @@ vec3 traceSceneReflection(vec3 origin, vec3 R, vec3 L, float isDay, float sunInt
     float terrainWeight = 0.0;
 
     if (R.y < 0.42) {
-        // A. Extended Raymarching against Cascade 0 & Cascade 1 (up to 250m)
+        // A. Extended Raymarching against Cascade 0 & Cascade 1 and Analytical World Mountains (up to 850m)
         if (waterQuality >= 1) {
-            int maxSteps = (waterQuality >= 2) ? 26 : 16;
-            float dist = 0.8 + dither * 0.6;
-            float maxDist = (waterQuality >= 2) ? 250.0 : 160.0;
+            int maxSteps = (waterQuality >= 2) ? 48 : 32;
+            float dist = 0.8 + dither * 0.8;
+            float maxDist = (waterQuality >= 2) ? 850.0 : 680.0;
 
             for (int i = 0; i < maxSteps; ++i) {
                 if (dist >= maxDist) break;
@@ -274,19 +316,30 @@ vec3 traceSceneReflection(vec3 origin, vec3 R, vec3 L, float isDay, float sunInt
                     }
                 }
 
-                // 2. Distant mountain silhouette reflection (for terrain beyond cascades, up to 350m)
-                if (dist > 35.0) {
-                    float hillHeight = 56.0 + 34.0 * sin(P.x * 0.0075) * cos(P.z * 0.0075 + 0.4) + 12.0 * sin(P.x * 0.016);
+                // 2. Distant mountain silhouette reflection matching TerrainGen.cpp (up to 850m)
+                if (dist > 30.0) {
+                    float hillHeight = getTerrainHeight(P.xz);
                     if (P.y <= hillHeight) {
-                        vec3 mountainGreen = vec3(0.06, 0.15, 0.05) * mix(0.45, 1.15, goldenHour);
-                        float distFade = clamp(dist / 350.0, 0.0, 0.75);
-                        terrainReflection = mix(mountainGreen, pc.skyFog.rgb, distFade);
-                        terrainWeight = 0.90 * (1.0 - distFade * 0.4);
+                        // Material tint by elevation
+                        vec3 mountainColor = vec3(0.07, 0.18, 0.06); // Forest pine green
+                        if (hillHeight > 82.0) {
+                            mountainColor = vec3(0.90, 0.94, 0.98); // Majestic snow caps
+                        } else if (hillHeight > 66.0) {
+                            mountainColor = vec3(0.32, 0.31, 0.30); // Granite rock cliffs
+                        }
+                        mountainColor *= mix(0.45, 1.15, goldenHour);
+
+                        float sunDiffuse = clamp(dot(vec3(-R.x, 0.6, -R.z), L), 0.30, 1.0);
+                        mountainColor *= mix(0.50, 1.10, sunDiffuse * isDay);
+
+                        float distFade = clamp(dist / maxDist, 0.0, 0.82);
+                        terrainReflection = mix(mountainColor, pc.skyFog.rgb, distFade);
+                        terrainWeight = 0.92 * (1.0 - distFade * 0.35);
                         break;
                     }
                 }
 
-                float stepSize = 0.8 + 0.15 * dist;
+                float stepSize = 1.0 + 0.12 * dist;
                 dist += stepSize;
             }
         }
@@ -332,40 +385,74 @@ void main() {
     // -------------------------------------------------------------
     // 2. Animated Directional Wind Wave Harmonics (AAA Wavy Liquid Surface)
     // -------------------------------------------------------------
-    float t = pc.camPos.w * 1.6;
+    float t = pc.camPos.w * 1.5;
     vec2 pos = fragWorldPos.xz;
 
-    // Multi-octave wave directions with distinct spatial frequencies & wave speeds
-    vec2 d1 = normalize(vec2(0.86, 0.50));
-    vec2 d2 = normalize(vec2(-0.48, 0.88));
-    vec2 d3 = normalize(vec2(0.92, -0.38));
-    vec2 d4 = normalize(vec2(-0.35, -0.94));
-    vec2 d5 = normalize(vec2(0.65, 0.76));
+    // 6 Wave Octaves: Large swells, wind chop, and capillary ripples
+    // Octave 1: Macro Lake/Ocean Swell (L = 28.0m, k = 0.224)
+    vec2  d1 = normalize(vec2(0.82, 0.57));
+    float k1 = 0.2244;
+    float a1 = 0.150;
+    float q1 = 0.55;
+    float w1 = dot(pos, d1) * k1 - t * 1.15;
 
-    float w1 = dot(pos, d1) * 0.45 - t * 1.3;
-    float w2 = dot(pos, d2) * 0.82 + t * 1.7;
-    float w3 = dot(pos, d3) * 1.80 - t * 2.5;
-    float w4 = dot(pos, d4) * 4.50 + t * 3.8;
-    float w5 = dot(pos, d5) * 12.0 - t * 6.2;
+    // Octave 2: Secondary Rolling Swell (L = 14.5m, k = 0.433)
+    vec2  d2 = normalize(vec2(-0.55, 0.83));
+    float k2 = 0.4333;
+    float a2 = 0.090;
+    float q2 = 0.50;
+    float w2 = dot(pos, d2) * k2 + t * 1.55;
 
-    // Gerstner trochoidal wave steepness sharpening: sharp crests, broad rounded troughs
+    // Octave 3: Directional Wind Chop (L = 6.2m, k = 1.013)
+    vec2  d3 = normalize(vec2(0.92, -0.39));
+    float k3 = 1.0134;
+    float a3 = 0.048;
+    float q3 = 0.45;
+    float w3 = dot(pos, d3) * k3 - t * 2.45;
+
+    // Octave 4: Cross Chop (L = 2.8m, k = 2.244)
+    vec2  d4 = normalize(vec2(-0.38, -0.92));
+    float k4 = 2.244;
+    float a4 = 0.024;
+    float q4 = 0.35;
+    float w4 = dot(pos, d4) * k4 + t * 3.80;
+
+    // Octave 5: Capillary Ripples (L = 1.1m, k = 5.712)
+    vec2  d5 = normalize(vec2(0.68, 0.73));
+    float k5 = 5.712;
+    float a5 = 0.012;
+    float q5 = 0.25;
+    float w5 = dot(pos, d5) * k5 - t * 5.60;
+
+    // Octave 6: Micro Capillary Sparkle (L = 0.35m, k = 17.95)
+    vec2  d6 = normalize(vec2(-0.70, 0.71));
+    float k6 = 17.95;
+    float a6 = 0.005;
+    float q6 = 0.20;
+    float w6 = dot(pos, d6) * k6 + t * 9.20;
+
     float s1 = sin(w1); float c1 = cos(w1);
     float s2 = sin(w2); float c2 = cos(w2);
     float s3 = sin(w3); float c3 = cos(w3);
     float s4 = sin(w4); float c4 = cos(w4);
-    float c5 = cos(w5);
+    float s5 = sin(w5); float c5 = cos(w5);
+    float s6 = sin(w6); float c6 = cos(w6);
 
-    // Dynamic wave amplitude modulated by graphics profile
-    float waveAmp = vibrant ? 1.0 : 0.75;
+    float waveAmp = vibrant ? 1.0 : 0.80;
 
-    // Gradient computation (wave slope vector) with Gerstner crest sharpening
     vec2 waveGrad = (
-        d1 * (c1 * (1.0 + s1 * 0.4) * 0.135) +
-        d2 * (c2 * (1.0 + s2 * 0.35) * 0.095) +
-        d3 * (c3 * (1.0 + s3 * 0.3) * 0.065) +
-        d4 * (c4 * 0.035) +
-        d5 * (c5 * 0.018)
+        d1 * (c1 * (1.0 + s1 * q1) * k1 * a1 * 2.8) +
+        d2 * (c2 * (1.0 + s2 * q2) * k2 * a2 * 2.5) +
+        d3 * (c3 * (1.0 + s3 * q3) * k3 * a3 * 2.2) +
+        d4 * (c4 * (1.0 + s4 * q4) * k4 * a4 * 1.8) +
+        d5 * (c5 * (1.0 + s5 * q5) * k5 * a5 * 1.4) +
+        d6 * (c6 * (1.0 + s6 * q6) * k6 * a6 * 1.2)
     ) * waveAmp;
+
+    // High-frequency dual counter-propagating micro turbulence for liquid sheen & glints
+    vec2 micro1 = vec2(sin(pos.x * 8.0 + t * 4.0), cos(pos.y * 8.0 + t * 3.5)) * 0.012;
+    vec2 micro2 = vec2(cos(pos.x * 14.0 - t * 6.0), sin(pos.y * 14.0 - t * 5.0)) * 0.007;
+    waveGrad += (micro1 + micro2) * waveAmp;
 
     vec3 N = normalize(fragNormal);
     if (abs(N.y) > 0.5) {

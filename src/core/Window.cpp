@@ -80,7 +80,7 @@ void Window::setWindowMode(int mode, int width, int height, int refreshRate) {
     if (!vidmode) return;
 
     if (mode == 1) {
-        // Borderless Fullscreen
+        // Borderless Fullscreen (Native desktop dimensions, borderless window)
         int monX = 0, monY = 0;
         glfwGetMonitorPos(monitor, &monX, &monY);
         glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_FALSE);
@@ -88,22 +88,28 @@ void Window::setWindowMode(int mode, int width, int height, int refreshRate) {
         m_width = vidmode->width;
         m_height = vidmode->height;
     } else if (mode == 2) {
-        // Exclusive Fullscreen
+        // Exclusive Fullscreen (Changes GPU display mode to target resolution & refresh rate)
         int hz = refreshRate > 0 ? refreshRate : vidmode->refreshRate;
         glfwSetWindowMonitor(m_window, monitor, 0, 0, width, height, hz);
         m_width = width;
         m_height = height;
     } else {
-        // Windowed
+        // Windowed Mode (Resizes window client area and centers on desktop)
         glfwSetWindowAttrib(m_window, GLFW_DECORATED, GLFW_TRUE);
+        glfwSetWindowMonitor(m_window, nullptr, 0, 0, width, height, GLFW_DONT_CARE);
+        glfwSetWindowSize(m_window, width, height);
+
         int posX = (vidmode->width - width) / 2;
         int posY = (vidmode->height - height) / 2;
-        if (posX < 0) posX = 50;
-        if (posY < 0) posY = 50;
-        glfwSetWindowMonitor(m_window, nullptr, posX, posY, width, height, GLFW_DONT_CARE);
+        if (posX < 0) posX = 40;
+        if (posY < 0) posY = 40;
+        glfwSetWindowPos(m_window, posX, posY);
+
         m_width = width;
         m_height = height;
     }
+
+    // Query physical swapchain framebuffer size in pixels
     int fbW = 0, fbH = 0;
     glfwGetFramebufferSize(m_window, &fbW, &fbH);
     if (fbW > 0 && fbH > 0) {

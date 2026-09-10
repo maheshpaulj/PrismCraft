@@ -21,6 +21,7 @@
 #include "renderer/ItemDropRenderer.hpp"
 #include "renderer/BlockCrackRenderer.hpp"
 #include "renderer/CloudRenderer.hpp"
+#include "renderer/CloudMapGenerator.hpp"
 #include "renderer/LightOverlayRenderer.hpp"
 #include "ui/UIRenderer.hpp"
 #include "ui/MenuRenderer.hpp"
@@ -110,17 +111,25 @@ static float calculateBreakDuration(BlockType block, BlockType tool) {
 }
 
 void run() {
-    Window window("PrismCraft", 1280, 720);
+    std::string exeDir = getExeDir();
+    GameOptions options;
+    ConfigManager::load(options, exeDir + "options.txt");
+
+    // Clamp terrain chunk streaming distance to realistic bounds [4, 24] so CPU is never flooded
+    options.renderDistance = std::clamp(options.renderDistance, 4, 24);
+
+    static const int resList[4][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
+    int initialW = resList[std::clamp(options.resIndex, 0, 3)][0];
+    int initialH = resList[std::clamp(options.resIndex, 0, 3)][1];
+
+    Window window("PrismCraft", initialW, initialH);
+    window.setWindowMode(options.windowMode, initialW, initialH, window.getRefreshRate());
     Input::init(window.getHandle());
     
     // Initialize procedural Audio Engine
     if (AudioEngine::get().init()) {
         std::cout << "[Audio] AudioEngine initialized." << std::endl;
     }
-    
-    std::string exeDir = getExeDir();
-    GameOptions options;
-    ConfigManager::load(options, exeDir + "options.txt");
 
     VulkanContext context(window.getHandle());
     Swapchain swapchain(context, window.getWidth(), window.getHeight(), options.vsync);
@@ -131,6 +140,11 @@ void run() {
     Texture textureAtlas(context, commandQueue, TextureAtlas::ATLAS_WIDTH, TextureAtlas::ATLAS_HEIGHT, atlasPixels.data());
     VkDescriptorSetLayout descLayout = textureAtlas.getDescriptorSetLayout();
     VkDescriptorSet descSet = textureAtlas.getDescriptorSet();
+
+    // Generate or Load Cached 512x512 Seamless Cloud Noise Map (Worley + Perlin seeded)
+    std::unique_ptr<Texture> cloudTexture = CloudMapGenerator::createCloudTexture(context, commandQueue, static_cast<uint32_t>(options.cloudSeed), exeDir);
+    VkDescriptorSet cloudDescSet = cloudTexture->getDescriptorSet();
+    int currentCloudSeed = options.cloudSeed;
 
     struct ShadowUBO {
         glm::mat4 lightViewProj[2];
@@ -790,9 +804,8 @@ void run() {
                         swapchain.setVSync(options.vsync, window.getWidth(), window.getHeight());
                     }
                     if (action == 13 || action == 14) {
-                        static const int resList[4][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
-                        int targetW = resList[options.resIndex][0];
-                        int targetH = resList[options.resIndex][1];
+                        int targetW = resList[std::clamp(options.resIndex, 0, 3)][0];
+                        int targetH = resList[std::clamp(options.resIndex, 0, 3)][1];
                         window.setWindowMode(options.windowMode, targetW, targetH, window.getRefreshRate());
                         swapchain.recreate(window.getWidth(), window.getHeight());
                     }
@@ -813,14 +826,19 @@ void run() {
                 int action = menuRenderer.handleClick(state, player, uiMousePos, uiW, uiH, currentSeed, options, !isPressed);
                 if (action != 0) {
                     if (action == 13 || action == 14) {
-                        static const int resList[4][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
-                        int targetW = resList[options.resIndex][0];
-                        int targetH = resList[options.resIndex][1];
+                        int targetW = resList[std::clamp(options.resIndex, 0, 3)][0];
+                        int targetH = resList[std::clamp(options.resIndex, 0, 3)][1];
                         window.setWindowMode(options.windowMode, targetW, targetH, window.getRefreshRate());
                         swapchain.recreate(window.getWidth(), window.getHeight());
                     }
                     if (swapchain.isVSyncEnabled() != options.vsync) {
                         swapchain.setVSync(options.vsync, window.getWidth(), window.getHeight());
+                    }
+                    if (options.cloudSeed != currentCloudSeed) {
+                        context.waitIdle();
+                        cloudTexture = CloudMapGenerator::createCloudTexture(context, commandQueue, static_cast<uint32_t>(options.cloudSeed), exeDir);
+                        cloudDescSet = cloudTexture->getDescriptorSet();
+                        currentCloudSeed = options.cloudSeed;
                     }
                     world->renderDistance = options.renderDistance;
                     world->lodPreset = options.lodPreset;
@@ -1252,7 +1270,7 @@ void run() {
             // 4. Render 3D Drifting Volumetric Clouds
             if (options.clouds && !isUnderwater) {
                 cloudPipeline.bind(cmd);
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cloudPipeline.getLayout(), 0, 1, &descSet, 0, nullptr);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cloudPipeline.getLayout(), 0, 1, &cloudDescSet, 0, nullptr);
                 cloudRenderer.render(cmd, cloudPipeline, camPos, timer.getElapsedTime(), vp, skyColor, sunDir);
             }
         }
