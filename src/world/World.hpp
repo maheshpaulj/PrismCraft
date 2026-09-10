@@ -36,6 +36,7 @@ struct StagedMeshResult {
     ChunkCoord coord;
     ChunkMesh mesh;
     LODLevel lod;
+    bool valid = true;
 };
 
 class World {
@@ -85,7 +86,7 @@ private:
     void uploadMesh(const ChunkCoord& coord, const ChunkMesh& mesh, LODLevel lod);
     Chunk* getChunk(const ChunkCoord& coord);
     const Chunk* getChunk(const ChunkCoord& coord) const;
-    [[nodiscard]] LODLevel calculateTargetLOD(int distChunks, LODLevel currentLOD) const;
+    [[nodiscard]] LODLevel calculateTargetLOD(int distChunks, std::optional<LODLevel> currentLOD = std::nullopt) const;
     
     VulkanContext& m_context;
     CommandQueue& m_cmdQueue;

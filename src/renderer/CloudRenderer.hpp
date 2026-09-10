@@ -22,17 +22,14 @@ public:
                 const glm::vec3& sunDir);
 
 private:
-    void rebuildCloudMesh(int anchorX, int anchorZ);
+    void buildSkyDome();
 
     VulkanContext& m_context;
     CommandQueue& m_cmdQueue;
 
-    Buffer m_vbo[MAX_FRAMES_IN_FLIGHT];
-    Buffer m_ibo[MAX_FRAMES_IN_FLIGHT];
-    uint32_t m_indexCount[MAX_FRAMES_IN_FLIGHT]{0, 0};
-    int m_frameIndex = 0;
-    int m_lastAnchorX = -999999;
-    int m_lastAnchorZ = -999999;
+    Buffer m_vbo;
+    Buffer m_ibo;
+    uint32_t m_indexCount = 0;
 };
 
 } // namespace prismcraft

@@ -75,7 +75,7 @@ void World::update(const glm::vec3& playerPos) {
     }
 }
 
-LODLevel World::calculateTargetLOD(int distChunks, LODLevel currentLOD) const {
+LODLevel World::calculateTargetLOD(int distChunks, std::optional<LODLevel> currentLOD) const {
     int t0 = 16, t1 = 48, t2 = 96;
     if (lodPreset == 0) { // Performance: aggressive LOD
         t0 = 8; t1 = 24; t2 = 64;
@@ -85,19 +85,28 @@ LODLevel World::calculateTargetLOD(int distChunks, LODLevel currentLOD) const {
         t0 = 32; t1 = 80; t2 = 160;
     }
 
-    // Apply Hysteresis: prevent flickering between LOD tiers
-    if (currentLOD == LODLevel::LOD0_Full) {
+    // If no existing mesh, assign LOD tier directly without hysteresis offsets
+    if (!currentLOD.has_value()) {
+        if (distChunks <= t0) return LODLevel::LOD0_Full;
+        if (distChunks <= t1) return LODLevel::LOD1_Medium;
+        if (distChunks <= t2) return LODLevel::LOD2_Coarse;
+        return LODLevel::LOD3_Imposter;
+    }
+
+    // Apply Hysteresis: prevent flickering between LOD tiers for existing meshes
+    LODLevel cur = currentLOD.value();
+    if (cur == LODLevel::LOD0_Full) {
         if (distChunks > t0 + 2) {
             return (distChunks <= t1) ? LODLevel::LOD1_Medium : ((distChunks <= t2) ? LODLevel::LOD2_Coarse : LODLevel::LOD3_Imposter);
         }
         return LODLevel::LOD0_Full;
-    } else if (currentLOD == LODLevel::LOD1_Medium) {
+    } else if (cur == LODLevel::LOD1_Medium) {
         if (distChunks <= t0 - 2) return LODLevel::LOD0_Full;
         if (distChunks > t1 + 3) {
             return (distChunks <= t2) ? LODLevel::LOD2_Coarse : LODLevel::LOD3_Imposter;
         }
         return LODLevel::LOD1_Medium;
-    } else if (currentLOD == LODLevel::LOD2_Coarse) {
+    } else if (cur == LODLevel::LOD2_Coarse) {
         if (distChunks <= t1 - 3) return LODLevel::LOD1_Medium;
         if (distChunks > t2 + 4) return LODLevel::LOD3_Imposter;
         return LODLevel::LOD2_Coarse;
@@ -127,7 +136,7 @@ void World::queueChunksAround(const ChunkCoord& center) {
                     curLOD = itMesh->second.lod;
                 }
 
-                LODLevel targetLOD = calculateTargetLOD(dist, curLOD);
+                LODLevel targetLOD = calculateTargetLOD(dist, hasMesh ? std::optional<LODLevel>(curLOD) : std::nullopt);
                 if (hasMesh && curLOD == targetLOD) {
                     continue;
                 }
@@ -145,7 +154,7 @@ void World::queueChunksAround(const ChunkCoord& center) {
                         ChunkMesh mesh = ChunkMesher::generateImposterMesh(coord, this->m_terrainGen);
                         {
                             std::lock_guard<std::mutex> lock(this->m_queueMutex);
-                            this->m_stagedMeshes.push_back({coord, std::move(mesh), targetLOD});
+                            this->m_stagedMeshes.push_back({coord, std::move(mesh), targetLOD, true});
                         }
                     });
                 } else if (dist > 32) {
@@ -155,7 +164,7 @@ void World::queueChunksAround(const ChunkCoord& center) {
                         ChunkMesh mesh = ChunkMesher::generateLODMesh(chunk, targetLOD);
                         {
                             std::lock_guard<std::mutex> lock(this->m_queueMutex);
-                            this->m_stagedMeshes.push_back({coord, std::move(mesh), targetLOD});
+                            this->m_stagedMeshes.push_back({coord, std::move(mesh), targetLOD, true});
                         }
                     });
                 } else {
@@ -225,19 +234,22 @@ void World::queueChunksAround(const ChunkCoord& center) {
                         }
 
                         ChunkMesh mesh;
+                        bool valid = false;
                         if (targetLOD == LODLevel::LOD0_Full) {
                             if (chunk && north && south && west && east) {
                                 mesh = ChunkMesher::generateMesh(*chunk, north, south, west, east, this);
+                                valid = true;
                             }
                         } else {
                             if (chunk) {
                                 mesh = ChunkMesher::generateLODMesh(*chunk, targetLOD);
+                                valid = true;
                             }
                         }
 
                         {
                             std::lock_guard<std::mutex> lock(this->m_queueMutex);
-                            this->m_stagedMeshes.push_back({coord, std::move(mesh), targetLOD});
+                            this->m_stagedMeshes.push_back({coord, std::move(mesh), targetLOD, valid});
                         }
                     });
                 }
@@ -284,9 +296,7 @@ void World::uploadMeshesBatched(std::vector<StagedMeshResult>& items) {
     uploadedData.reserve(items.size());
 
     for (auto& item : items) {
-        if (item.mesh.empty()) {
-            m_meshes.erase(item.coord);
-            m_chunkLODs.erase(item.coord);
+        if (!item.valid) {
             std::lock_guard<std::mutex> qlock(m_queueMutex);
             m_pendingTasks.erase(item.coord);
             continue;
@@ -364,9 +374,9 @@ void World::uploadMeshesBatched(std::vector<StagedMeshResult>& items) {
 }
 
 void World::unloadDistantChunks(const ChunkCoord& center) {
-    int maxDist = renderDistance + 4;
+    int maxDist = renderDistance + 6;
 
-    // 1. Unload GPU meshes beyond renderDistance + 4
+    // 1. Unload GPU meshes beyond renderDistance + 6
     for (auto it = m_meshes.begin(); it != m_meshes.end(); ) {
         int dist = std::max(std::abs(it->first.cx - center.cx), std::abs(it->first.cz - center.cz));
         if (dist > maxDist) {
@@ -377,8 +387,8 @@ void World::unloadDistantChunks(const ChunkCoord& center) {
         }
     }
 
-    // 2. Unload voxel block RAM for chunks outside active radius (scaling with render distance, bounded to 20)
-    int maxVoxelDist = std::min(renderDistance + 2, 20);
+    // 2. Unload voxel block RAM for chunks outside active radius (scales with render distance)
+    int maxVoxelDist = renderDistance + 4;
     {
         std::unique_lock<std::shared_mutex> lock(m_chunksMutex);
         std::lock_guard<std::mutex> qlock(m_queueMutex);
@@ -775,13 +785,15 @@ bool World::updateLoading(const glm::vec3& spawnPos, int targetRadius, int& load
             }
 
             ChunkMesh mesh;
+            bool valid = false;
             if (chunk && north && south && west && east) {
                 mesh = ChunkMesher::generateMesh(*chunk, north, south, west, east, this);
+                valid = true;
             }
 
             {
                 std::lock_guard<std::mutex> lock(this->m_queueMutex);
-                this->m_stagedMeshes.push_back({coord, std::move(mesh), LODLevel::LOD0_Full});
+                this->m_stagedMeshes.push_back({coord, std::move(mesh), LODLevel::LOD0_Full, valid});
             }
         });
     }

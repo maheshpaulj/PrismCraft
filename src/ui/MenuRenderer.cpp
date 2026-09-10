@@ -245,35 +245,160 @@ int MenuRenderer::handleClick(GameState& state, Player& player, glm::vec2 mouseP
         }
     } else if (state == GameState::Options) {
         float bW = 260.0f;
-        float bH = 38.0f;
+        float bH = 40.0f;
         float lx = cx - 275.0f;
         float rx = cx + 15.0f;
-        float y0 = cy - 170.0f;
-        float dy = 42.0f;
+        float y0 = cy - 110.0f;
+        float dy = 50.0f;
 
         auto inBox = [&](float bx, float by, float bw, float bh) {
             return (mousePos.x >= bx && mousePos.x <= bx + bw && mousePos.y >= by && mousePos.y <= by + bh);
         };
 
-        // Row 0: FOV (slider, left) | MOUSE SENS (slider, right)
+        // Row 0: FOV (slider, left) | DEBUG HUD F3 (button, right)
         if (inBox(lx, y0, bW, bH)) {
             float t = std::clamp((mousePos.x - lx) / bW, 0.0f, 1.0f);
             options.fov = static_cast<int>(std::round(60.0f + t * 50.0f));
             return 7;
         }
-        if (inBox(rx, y0, bW, bH)) {
-            float t = std::clamp((mousePos.x - rx) / bW, 0.0f, 1.0f);
-            options.mouseSens = 0.2f + t * 2.8f;
-            return 8;
+        if (inBox(rx, y0, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.debugHUD = !options.debugHUD;
+            return 23;
         }
 
-        // Row 1: MUSIC & SOUNDS (button, left) | UI SCALE (toggle, right)
+        // Row 1: VIDEO SETTINGS... (left) | MUSIC & SOUNDS... (right)
         if (inBox(lx, y0 + dy, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            state = GameState::VideoSettings;
+            return 6;
+        }
+        if (inBox(rx, y0 + dy, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
             state = GameState::AudioSettings;
             return 6;
         }
+
+        // Row 2: CONTROLS & KEYBINDS... (left) | LIGHT OVERLAY F7 (right)
+        if (inBox(lx, y0 + dy * 2.0f, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            state = GameState::ControlsSettings;
+            return 6;
+        }
+        if (inBox(rx, y0 + dy * 2.0f, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.lightOverlay = !options.lightOverlay;
+            return 20;
+        }
+
+        // Row 3: DONE / BACK (center, width 320, height 40)
+        float doneW = 320.0f;
+        float doneH = 42.0f;
+        float doneX = cx - doneW * 0.5f;
+        float doneY = y0 + dy * 3.5f;
+        if (inBox(doneX, doneY, doneW, doneH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            state = m_previousState;
+            return 4;
+        }
+    } else if (state == GameState::VideoSettings) {
+        float bW = 260.0f;
+        float bH = 36.0f;
+        float lx = cx - 275.0f;
+        float rx = cx + 15.0f;
+        float y0 = cy - 190.0f;
+        float dy = 40.0f;
+
+        auto inBox = [&](float bx, float by, float bw, float bh) {
+            return (mousePos.x >= bx && mousePos.x <= bx + bw && mousePos.y >= by && mousePos.y <= by + bh);
+        };
+
+        // Row 0: VIBRANT SHADERS (toggle, left) | SHADOW QUALITY (toggle, right)
+        if (inBox(lx, y0, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.vibrantVisuals = !options.vibrantVisuals;
+            return 19;
+        }
+        if (inBox(rx, y0, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.shadowQuality = (options.shadowQuality + 1) % 4;
+            return 24;
+        }
+
+        // Row 1: RENDER DISTANCE (toggle, left) | MAX FPS (toggle, right)
+        if (inBox(lx, y0 + dy, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            static const int rdList[] = {4, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256};
+            int curIdx = 3;
+            for (int k = 0; k < 12; ++k) { if (rdList[k] == options.renderDistance) { curIdx = k; break; } }
+            options.renderDistance = rdList[(curIdx + 1) % 12];
+            return 17;
+        }
         if (inBox(rx, y0 + dy, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            static const int fpsList[] = {0, 30, 60, 90, 120, 144, 240};
+            int curIdx = 0;
+            for (int k = 0; k < 7; ++k) { if (fpsList[k] == options.maxFps) { curIdx = k; break; } }
+            options.maxFps = fpsList[(curIdx + 1) % 7];
+            return 15;
+        }
+
+        // Row 2: WATER & SSR (toggle, left) | COLOR GRADING (toggle, right)
+        if (inBox(lx, y0 + dy * 2.0f, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.waterQuality = (options.waterQuality + 1) % 3;
+            return 25;
+        }
+        if (inBox(rx, y0 + dy * 2.0f, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.colorGrading = (options.colorGrading + 1) % 5;
+            return 26;
+        }
+
+        // Row 3: CLOUDS 3D (toggle, left) | CLOUD SHADOWS (toggle, right)
+        if (inBox(lx, y0 + dy * 3.0f, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.clouds = !options.clouds;
+            options.cloudShadows = options.clouds;
+            return 18;
+        }
+        if (inBox(rx, y0 + dy * 3.0f, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.cloudShadows = !options.cloudShadows;
+            return 27;
+        }
+
+        // Row 4: SMOOTH LIGHTING (toggle, left) | STEVE SHADOW (toggle, right)
+        if (inBox(lx, y0 + dy * 4.0f, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.smoothLighting = !options.smoothLighting;
+            return 29;
+        }
+        if (inBox(rx, y0 + dy * 4.0f, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.playerShadow = !options.playerShadow;
+            return 28;
+        }
+
+        // Row 5: ATMOSPHERE FOG (toggle, left) | LOD PRESET (toggle, right)
+        if (inBox(lx, y0 + dy * 5.0f, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.atmosphericFog = (options.atmosphericFog + 1) % 3;
+            return 30;
+        }
+        if (inBox(rx, y0 + dy * 5.0f, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.lodPreset = (options.lodPreset + 1) % 4;
+            return 21;
+        }
+
+        // Row 6: VSYNC (toggle, left) | UI SCALE (toggle, right)
+        if (inBox(lx, y0 + dy * 6.0f, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.vsync = !options.vsync;
+            return 16;
+        }
+        if (inBox(rx, y0 + dy * 6.0f, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
             if (options.uiScale < 1.25f) options.uiScale = 1.5f;
             else if (options.uiScale < 1.75f) options.uiScale = 2.0f;
@@ -283,84 +408,59 @@ int MenuRenderer::handleClick(GameState& state, Player& player, glm::vec2 mouseP
             return 12;
         }
 
-        // Row 2: WINDOW MODE (toggle, left) | RESOLUTION (toggle, right)
-        if (inBox(lx, y0 + dy * 2.0f, bW, bH) && !isDown) {
-            AudioEngine::get().playSound(SoundEffect::Click);
-            options.windowMode = (options.windowMode + 1) % 3;
-            return 13;
-        }
-        if (inBox(rx, y0 + dy * 2.0f, bW, bH) && !isDown) {
+        // Row 7: RESOLUTION (toggle, left) | WINDOW MODE (toggle, right)
+        if (inBox(lx, y0 + dy * 7.0f, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
             options.resIndex = (options.resIndex + 1) % 4;
             return 14;
         }
-
-        // Row 3: MAX FPS (toggle, left) | VSYNC (toggle, right)
-        if (inBox(lx, y0 + dy * 3.0f, bW, bH) && !isDown) {
+        if (inBox(rx, y0 + dy * 7.0f, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
-            static const int fpsList[] = {0, 30, 60, 90, 120, 144, 240};
-            int curIdx = 0;
-            for (int k = 0; k < 7; ++k) { if (fpsList[k] == options.maxFps) { curIdx = k; break; } }
-            options.maxFps = fpsList[(curIdx + 1) % 7];
-            return 15;
-        }
-        if (inBox(rx, y0 + dy * 3.0f, bW, bH) && !isDown) {
-            AudioEngine::get().playSound(SoundEffect::Click);
-            options.vsync = !options.vsync;
-            return 16;
+            options.windowMode = (options.windowMode + 1) % 3;
+            return 13;
         }
 
-        // Row 4: RENDER DISTANCE (toggle, left) | LOD PRESET (toggle, right)
-        if (inBox(lx, y0 + dy * 4.0f, bW, bH) && !isDown) {
-            AudioEngine::get().playSound(SoundEffect::Click);
-            static const int rdList[] = {4, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256};
-            int curIdx = 3;
-            for (int k = 0; k < 12; ++k) { if (rdList[k] == options.renderDistance) { curIdx = k; break; } }
-            options.renderDistance = rdList[(curIdx + 1) % 12];
-            return 17;
-        }
-        if (inBox(rx, y0 + dy * 4.0f, bW, bH) && !isDown) {
-            AudioEngine::get().playSound(SoundEffect::Click);
-            options.lodPreset = (options.lodPreset + 1) % 4;
-            return 21;
-        }
-
-        // Row 5: FOG FALLOFF (toggle, left) | CLOUDS (toggle, right)
-        if (inBox(lx, y0 + dy * 5.0f, bW, bH) && !isDown) {
-            AudioEngine::get().playSound(SoundEffect::Click);
-            if (options.fogFalloff < 0.75f) options.fogFalloff = 0.85f;
-            else if (options.fogFalloff < 0.95f) options.fogFalloff = 1.0f;
-            else options.fogFalloff = 0.65f;
-            return 22;
-        }
-        if (inBox(rx, y0 + dy * 5.0f, bW, bH) && !isDown) {
-            AudioEngine::get().playSound(SoundEffect::Click);
-            options.clouds = !options.clouds;
-            options.cloudShadows = options.clouds;
-            return 18;
-        }
-
-        // Row 6: VIBRANT VISUALS (toggle, left) | LIGHT OVERLAY F7 (toggle, right)
-        if (inBox(lx, y0 + dy * 6.0f, bW, bH) && !isDown) {
-            AudioEngine::get().playSound(SoundEffect::Click);
-            options.vibrantVisuals = !options.vibrantVisuals;
-            return 19;
-        }
-        if (inBox(rx, y0 + dy * 6.0f, bW, bH) && !isDown) {
-            AudioEngine::get().playSound(SoundEffect::Click);
-            options.lightOverlay = !options.lightOverlay;
-            return 20;
-        }
-
-        // Row 7: BACK / DONE (center, width 320, height 40)
+        // Row 8: DONE / BACK (center)
         float doneW = 320.0f;
         float doneH = 40.0f;
         float doneX = cx - doneW * 0.5f;
-        float doneY = y0 + dy * 7.0f + 16.0f;
+        float doneY = y0 + dy * 8.0f + 10.0f;
         if (inBox(doneX, doneY, doneW, doneH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
-            state = m_previousState;
-            return 4;
+            state = GameState::Options;
+            return 6;
+        }
+    } else if (state == GameState::ControlsSettings) {
+        float bW = 260.0f;
+        float bH = 40.0f;
+        float lx = cx - 275.0f;
+        float rx = cx + 15.0f;
+        float y0 = cy - 160.0f;
+
+        auto inBox = [&](float bx, float by, float bw, float bh) {
+            return (mousePos.x >= bx && mousePos.x <= bx + bw && mousePos.y >= by && mousePos.y <= by + bh);
+        };
+
+        // Mouse Sensitivity Slider
+        if (inBox(lx, y0, bW, bH)) {
+            float t = std::clamp((mousePos.x - lx) / bW, 0.0f, 1.0f);
+            options.mouseSens = 0.2f + t * 2.8f;
+            return 8;
+        }
+        if (inBox(rx, y0, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            return 8;
+        }
+
+        // Done button
+        float doneW = 320.0f;
+        float doneH = 40.0f;
+        float doneX = cx - doneW * 0.5f;
+        float doneY = cy + 160.0f;
+        if (inBox(doneX, doneY, doneW, doneH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            state = GameState::Options;
+            return 6;
         }
     } else if (state == GameState::AudioSettings) {
         float bW = 260.0f;
@@ -775,17 +875,32 @@ void MenuRenderer::rebuildMenuMesh(GameState state, const Player& player, uint32
         FontRenderer::drawText(vertices, indices, label, x + (w - textW) * 0.5f, y + (h - 15.0f) * 0.5f, 15.0f, textCol, true);
     };
 
-    // Sleek Rectangular Toggle Button with 3D Bevel
+    // Sleek Rectangular Toggle Button with 3D Bevel & PrismCraft Triangular Accents
     auto addRectButton = [&](float x, float y, float w, float h, const std::string& label, bool hovered, bool active) {
         glm::vec3 bgCol = hovered ? glm::vec3(0.24f, 0.25f, 0.30f) : (active ? glm::vec3(0.16f, 0.18f, 0.24f) : glm::vec3(0.12f, 0.12f, 0.15f));
         addSolidQuad(x, y, w, h, bgCol);
 
-        glm::vec3 frameLight = hovered ? glm::vec3(0.75f, 0.75f, 0.85f) : (active ? glm::vec3(0.40f, 0.55f, 0.70f) : glm::vec3(0.30f, 0.30f, 0.35f));
+        glm::vec3 frameLight = hovered ? glm::vec3(0.85f, 0.85f, 0.95f) : (active ? glm::vec3(0.40f, 0.55f, 0.70f) : glm::vec3(0.30f, 0.30f, 0.35f));
         glm::vec3 frameDark  = hovered ? glm::vec3(0.18f, 0.18f, 0.22f) : glm::vec3(0.08f, 0.08f, 0.10f);
         addSolidQuad(x, y, w, 2.0f, frameLight);
         addSolidQuad(x, y, 2.0f, h, frameLight);
         addSolidQuad(x, y + h - 2.0f, w, 2.0f, frameDark);
         addSolidQuad(x + w - 2.0f, y, 2.0f, h, frameDark);
+
+        // Triangular Chevron Accents (▶ on left, ◀ on right)
+        glm::vec3 triAccent = hovered ? glm::vec3(1.0f, 0.88f, 0.30f) : (active ? glm::vec3(0.50f, 0.75f, 0.95f) : glm::vec3(0.35f, 0.38f, 0.45f));
+        float triS = 4.5f;
+        float midY = y + h * 0.5f;
+
+        // Left triangle ▶
+        addTri(glm::vec3(x + 13.0f, midY, 0.0f),
+               glm::vec3(x + 7.0f, midY - triS, 0.0f),
+               glm::vec3(x + 7.0f, midY + triS, 0.0f), triAccent);
+
+        // Right triangle ◀
+        addTri(glm::vec3(x + w - 13.0f, midY, 0.0f),
+               glm::vec3(x + w - 7.0f, midY + triS, 0.0f),
+               glm::vec3(x + w - 7.0f, midY - triS, 0.0f), triAccent);
 
         float textW = FontRenderer::getTextWidth(label, 13.5f);
         glm::vec3 textCol = hovered ? glm::vec3(1.0f, 1.0f, 0.40f) : (active ? glm::vec3(0.95f, 0.95f, 0.95f) : glm::vec3(0.60f, 0.60f, 0.60f));
@@ -957,98 +1072,146 @@ void MenuRenderer::rebuildMenuMesh(GameState state, const Player& player, uint32
 
         // Title Box "SETTINGS & OPTIONS"
         float titleBoxW = 460.0f;
-        addSolidQuad(cx - titleBoxW * 0.5f, cy - 200.0f, titleBoxW, 40.0f, glm::vec3(0.14f, 0.14f, 0.18f));
-        addSolidQuad(cx - titleBoxW * 0.5f, cy - 200.0f, titleBoxW, 3.0f, glm::vec3(0.95f, 0.75f, 0.20f));
+        addSolidQuad(cx - titleBoxW * 0.5f, cy - 180.0f, titleBoxW, 40.0f, glm::vec3(0.14f, 0.14f, 0.18f));
+        addSolidQuad(cx - titleBoxW * 0.5f, cy - 180.0f, titleBoxW, 3.0f, glm::vec3(0.95f, 0.75f, 0.20f));
         std::string optTitle = "SETTINGS & OPTIONS";
         float optW = FontRenderer::getTextWidth(optTitle, 22.0f);
-        FontRenderer::drawText(vertices, indices, optTitle, cx - optW * 0.5f, cy - 191.0f, 22.0f, glm::vec3(1.0f, 0.85f, 0.20f), true);
+        FontRenderer::drawText(vertices, indices, optTitle, cx - optW * 0.5f, cy - 171.0f, 22.0f, glm::vec3(1.0f, 0.85f, 0.20f), true);
 
         float bW = 260.0f;
-        float bH = 38.0f;
+        float bH = 40.0f;
         float lx = cx - 275.0f;
         float rx = cx + 15.0f;
-        float y0 = cy - 170.0f;
-        float dy = 42.0f;
+        float y0 = cy - 110.0f;
+        float dy = 50.0f;
 
         auto inBox = [&](float bx_, float by_, float bw_, float bh_) {
             return (mousePos.x >= bx_ && mousePos.x <= bx_ + bw_ && mousePos.y >= by_ && mousePos.y <= by_ + bh_);
         };
 
-        // Row 0: FOV | MOUSE SENS
+        // Row 0: FOV slider (left) | DEBUG HUD F3 (right)
         float fovRatio = std::clamp((static_cast<float>(options.fov) - 60.0f) / 50.0f, 0.0f, 1.0f);
         char fovBuf[64];
         std::snprintf(fovBuf, sizeof(fovBuf), "FOV: %d DEG", options.fov);
         addSlider(lx, y0, bW, bH, fovRatio, fovBuf, inBox(lx, y0, bW, bH));
 
-        float sensRatio = std::clamp((options.mouseSens - 0.2f) / 2.8f, 0.0f, 1.0f);
-        char sensBuf[64];
-        std::snprintf(sensBuf, sizeof(sensBuf), "MOUSE SENS: %.2fx", options.mouseSens);
-        addSlider(rx, y0, bW, bH, sensRatio, sensBuf, inBox(rx, y0, bW, bH));
+        std::string debugStr = options.debugHUD ? "DEBUG HUD [F3]: ON" : "DEBUG HUD [F3]: OFF";
+        addRectButton(rx, y0, bW, bH, debugStr, inBox(rx, y0, bW, bH), options.debugHUD);
 
-        // Row 1: MUSIC & SOUNDS... | UI SCALE
-        addRectButton(lx, y0 + dy, bW, bH, "MUSIC & SOUNDS...", inBox(lx, y0 + dy, bW, bH), true);
+        // Row 1: VIDEO SETTINGS... (left) | MUSIC & SOUNDS... (right)
+        addRectButton(lx, y0 + dy, bW, bH, "VIDEO SETTINGS...", inBox(lx, y0 + dy, bW, bH), true);
+        addRectButton(rx, y0 + dy, bW, bH, "MUSIC & SOUNDS...", inBox(rx, y0 + dy, bW, bH), true);
 
-        char uiBuf[64];
-        std::snprintf(uiBuf, sizeof(uiBuf), "UI SCALE: %.1fx", options.uiScale);
-        addRectButton(rx, y0 + dy, bW, bH, uiBuf, inBox(rx, y0 + dy, bW, bH), true);
+        // Row 2: CONTROLS & KEYBINDS... (left) | LIGHT OVERLAY F7 (right)
+        addRectButton(lx, y0 + dy * 2.0f, bW, bH, "CONTROLS & KEYBINDS...", inBox(lx, y0 + dy * 2.0f, bW, bH), true);
+        std::string lightStr = options.lightOverlay ? "LIGHT OVERLAY [F7]: ON" : "LIGHT OVERLAY [F7]: OFF";
+        addRectButton(rx, y0 + dy * 2.0f, bW, bH, lightStr, inBox(rx, y0 + dy * 2.0f, bW, bH), options.lightOverlay);
 
-        // Row 2: WINDOW MODE | RESOLUTION
-        const char* winModes[] = {"MODE: WINDOWED", "MODE: BORDERLESS", "MODE: FULLSCREEN"};
-        addRectButton(lx, y0 + dy * 2.0f, bW, bH, winModes[std::clamp(options.windowMode, 0, 2)], inBox(lx, y0 + dy * 2.0f, bW, bH), true);
+        // Row 3: BACK / DONE (center)
+        float doneW = 320.0f;
+        float doneH = 42.0f;
+        float doneX = cx - doneW * 0.5f;
+        float doneY = y0 + dy * 3.5f;
+        addRectButton(doneX, doneY, doneW, doneH, "DONE / BACK", inBox(doneX, doneY, doneW, doneH), true);
 
-        const char* resNames[] = {"RES: 1280x720", "RES: 1600x900", "RES: 1920x1080", "RES: 2560x1440"};
-        addRectButton(rx, y0 + dy * 2.0f, bW, bH, resNames[std::clamp(options.resIndex, 0, 3)], inBox(rx, y0 + dy * 2.0f, bW, bH), true);
+        // Footer info
+        std::string infoStr = "PrismCraft Engine v1.3 | Triangular Prism Honeycomb Architecture";
+        float infoW = FontRenderer::getTextWidth(infoStr, 12.0f);
+        FontRenderer::drawText(vertices, indices, infoStr, cx - infoW * 0.5f, sh - 25.0f, 12.0f, glm::vec3(0.65f, 0.65f, 0.70f), true);
 
-        // Row 3: MAX FPS | VSYNC
+    } else if (state == GameState::VideoSettings) {
+        glm::vec4 dirtUV = TextureAtlas::getTileUV(2);
+        for (float by = 0; by < sh; by += 48.0f) {
+            for (float bpx = 0; bpx < sw; bpx += 48.0f) {
+                addTexturedQuad(bpx, by, 48.0f, 48.0f, dirtUV, glm::vec3(0.24f));
+            }
+        }
+
+        // Header "VIDEO & SHADER PACK SETTINGS"
+        float titleBoxW = 460.0f;
+        addSolidQuad(cx - titleBoxW * 0.5f, cy - 235.0f, titleBoxW, 40.0f, glm::vec3(0.16f, 0.16f, 0.20f));
+        addSolidQuad(cx - titleBoxW * 0.5f, cy - 235.0f, titleBoxW, 2.5f, glm::vec3(0.40f, 0.65f, 0.95f));
+        std::string title = "VIDEO & SHADER PACK SETTINGS";
+        float titleW = FontRenderer::getTextWidth(title, 18.0f);
+        FontRenderer::drawText(vertices, indices, title, cx - titleW * 0.5f, cy - 224.0f, 18.0f, glm::vec3(1.0f, 0.90f, 0.35f), true);
+
+        float bW = 260.0f;
+        float bH = 36.0f;
+        float lx = cx - 275.0f;
+        float rx = cx + 15.0f;
+        float y0 = cy - 190.0f;
+        float dy = 40.0f;
+
+        auto inBox = [&](float bx_, float by_, float bw_, float bh_) {
+            return (mousePos.x >= bx_ && mousePos.x <= bx_ + bw_ && mousePos.y >= by_ && mousePos.y <= by_ + bh_);
+        };
+
+        // Row 0: VIBRANT SHADERS | SHADOW QUALITY
+        std::string vibStr = options.vibrantVisuals ? "VIBRANT SHADERS: ON" : "VIBRANT SHADERS: OFF";
+        addRectButton(lx, y0, bW, bH, vibStr, inBox(lx, y0, bW, bH), options.vibrantVisuals);
+
+        const char* shadowNames[] = {"SHADOWS: OFF", "SHADOWS: LOW", "SHADOWS: MEDIUM", "SHADOWS: HIGH"};
+        addRectButton(rx, y0, bW, bH, shadowNames[std::clamp(options.shadowQuality, 0, 3)], inBox(rx, y0, bW, bH), options.shadowQuality > 0);
+
+        // Row 1: RENDER DISTANCE | MAX FPS
+        char rdBuf[64];
+        std::snprintf(rdBuf, sizeof(rdBuf), "RENDER DIST: %d CHUNKS", options.renderDistance);
+        addRectButton(lx, y0 + dy, bW, bH, rdBuf, inBox(lx, y0 + dy, bW, bH), true);
+
         char fpsBuf[64];
         if (options.maxFps <= 0) std::snprintf(fpsBuf, sizeof(fpsBuf), "MAX FPS: UNLIMITED");
         else std::snprintf(fpsBuf, sizeof(fpsBuf), "MAX FPS: %d FPS", options.maxFps);
-        addRectButton(lx, y0 + dy * 3.0f, bW, bH, fpsBuf, inBox(lx, y0 + dy * 3.0f, bW, bH), true);
+        addRectButton(rx, y0 + dy, bW, bH, fpsBuf, inBox(rx, y0 + dy, bW, bH), true);
 
-        std::string vsyncStr = options.vsync ? "VSYNC: ENABLED" : "VSYNC: DISABLED";
-        addRectButton(rx, y0 + dy * 3.0f, bW, bH, vsyncStr, inBox(rx, y0 + dy * 3.0f, bW, bH), options.vsync);
+        // Row 2: WATER & SSR | COLOR GRADING
+        const char* waterNames[] = {"WATER: FAST", "WATER: REALISTIC", "WATER: RTX SSR"};
+        addRectButton(lx, y0 + dy * 2.0f, bW, bH, waterNames[std::clamp(options.waterQuality, 0, 2)], inBox(lx, y0 + dy * 2.0f, bW, bH), true);
 
-        // Row 4: RENDER DISTANCE | LOD PRESET
-        char rdBuf[64];
-        std::snprintf(rdBuf, sizeof(rdBuf), "RENDER DIST: %d CHUNKS", options.renderDistance);
-        addRectButton(lx, y0 + dy * 4.0f, bW, bH, rdBuf, inBox(lx, y0 + dy * 4.0f, bW, bH), true);
+        const char* gradeNames[] = {"COLOR: DEFAULT", "COLOR: CINEMATIC", "COLOR: VIBRANT", "COLOR: WARM", "COLOR: COOL"};
+        addRectButton(rx, y0 + dy * 2.0f, bW, bH, gradeNames[std::clamp(options.colorGrading, 0, 4)], inBox(rx, y0 + dy * 2.0f, bW, bH), options.colorGrading > 0);
+
+        // Row 3: CLOUDS 3D | CLOUD SHADOWS
+        std::string cloudStr = options.clouds ? "CLOUDS: VOLUMETRIC 3D" : "CLOUDS: OFF";
+        addRectButton(lx, y0 + dy * 3.0f, bW, bH, cloudStr, inBox(lx, y0 + dy * 3.0f, bW, bH), options.clouds);
+
+        std::string cShadowStr = options.cloudShadows ? "CLOUD SHADOWS: ON" : "CLOUD SHADOWS: OFF";
+        addRectButton(rx, y0 + dy * 3.0f, bW, bH, cShadowStr, inBox(rx, y0 + dy * 3.0f, bW, bH), options.cloudShadows);
+
+        // Row 4: SMOOTH LIGHTING / SSAO | STEVE SHADOW
+        std::string aoStr = options.smoothLighting ? "SMOOTH LIGHT / SSAO: ON" : "SMOOTH LIGHT: OFF";
+        addRectButton(lx, y0 + dy * 4.0f, bW, bH, aoStr, inBox(lx, y0 + dy * 4.0f, bW, bH), options.smoothLighting);
+
+        std::string pShadowStr = options.playerShadow ? "STEVE SHADOW: ON" : "STEVE SHADOW: OFF";
+        addRectButton(rx, y0 + dy * 4.0f, bW, bH, pShadowStr, inBox(rx, y0 + dy * 4.0f, bW, bH), options.playerShadow);
+
+        // Row 5: ATMOSPHERE FOG | LOD PRESET
+        const char* atmosNames[] = {"ATMOSPHERE: OFF", "ATMOSPHERE: SUBTLE", "ATMOSPHERE: DENSE"};
+        addRectButton(lx, y0 + dy * 5.0f, bW, bH, atmosNames[std::clamp(options.atmosphericFog, 0, 2)], inBox(lx, y0 + dy * 5.0f, bW, bH), options.atmosphericFog > 0);
 
         const char* lodNames[] = {"LOD: PERFORMANCE", "LOD: BALANCED", "LOD: QUALITY", "LOD: ULTRA"};
-        addRectButton(rx, y0 + dy * 4.0f, bW, bH, lodNames[std::clamp(options.lodPreset, 0, 3)], inBox(rx, y0 + dy * 4.0f, bW, bH), true);
+        addRectButton(rx, y0 + dy * 5.0f, bW, bH, lodNames[std::clamp(options.lodPreset, 0, 3)], inBox(rx, y0 + dy * 5.0f, bW, bH), true);
 
-        // Row 5: FOG FALLOFF | CLOUDS
-        const char* fogStr = (options.fogFalloff < 0.75f) ? "FOG: DENSE (0.65x)" :
-                            ((options.fogFalloff < 0.95f) ? "FOG: BALANCED (0.85x)" : "FOG: CLEAR SKY (1.0x)");
-        addRectButton(lx, y0 + dy * 5.0f, bW, bH, fogStr, inBox(lx, y0 + dy * 5.0f, bW, bH), true);
+        // Row 6: VSYNC | UI SCALE
+        std::string vsyncStr = options.vsync ? "VSYNC: ENABLED" : "VSYNC: DISABLED";
+        addRectButton(lx, y0 + dy * 6.0f, bW, bH, vsyncStr, inBox(lx, y0 + dy * 6.0f, bW, bH), options.vsync);
 
-        std::string cloudStr = options.clouds ? "CLOUDS: ON (SHADOWS)" : "CLOUDS: OFF";
-        addRectButton(rx, y0 + dy * 5.0f, bW, bH, cloudStr, inBox(rx, y0 + dy * 5.0f, bW, bH), options.clouds);
+        char uiBuf[64];
+        std::snprintf(uiBuf, sizeof(uiBuf), "UI SCALE: %.1fx", options.uiScale);
+        addRectButton(rx, y0 + dy * 6.0f, bW, bH, uiBuf, inBox(rx, y0 + dy * 6.0f, bW, bH), true);
 
-        // Row 6: VIBRANT VISUALS | LIGHT OVERLAY F7
-        std::string vibrantStr = options.vibrantVisuals ? "VIBRANT VISUALS: ON" : "VIBRANT VISUALS: OFF";
-        addRectButton(lx, y0 + dy * 6.0f, bW, bH, vibrantStr, inBox(lx, y0 + dy * 6.0f, bW, bH), options.vibrantVisuals);
+        // Row 7: RESOLUTION | WINDOW MODE
+        const char* resNames[] = {"RES: 1280x720", "RES: 1600x900", "RES: 1920x1080", "RES: 2560x1440"};
+        addRectButton(lx, y0 + dy * 7.0f, bW, bH, resNames[std::clamp(options.resIndex, 0, 3)], inBox(lx, y0 + dy * 7.0f, bW, bH), true);
 
-        std::string lightStr = options.lightOverlay ? "LIGHT OVERLAY [F7]: ON" : "LIGHT OVERLAY [F7]: OFF";
-        addRectButton(rx, y0 + dy * 6.0f, bW, bH, lightStr, inBox(rx, y0 + dy * 6.0f, bW, bH), options.lightOverlay);
+        const char* winModes[] = {"MODE: WINDOWED", "MODE: BORDERLESS", "MODE: FULLSCREEN"};
+        addRectButton(rx, y0 + dy * 7.0f, bW, bH, winModes[std::clamp(options.windowMode, 0, 2)], inBox(rx, y0 + dy * 7.0f, bW, bH), true);
 
-        // Hardware Performance Warning Banner if Render Distance >= 96 chunks
-        if (options.renderDistance >= 96) {
-            std::string warnStr = "[!] 96+ CHUNKS: HIGH MEMORY & GPU LOAD (16GB RAM / 4GB VRAM REQUIRED)";
-            float warnW = FontRenderer::getTextWidth(warnStr, 12.0f);
-            FontRenderer::drawText(vertices, indices, warnStr, cx - warnW * 0.5f, y0 + dy * 7.0f - 2.0f, 12.0f, glm::vec3(1.0f, 0.75f, 0.20f), true);
-        }
-
-        // Row 7: BACK / DONE (center)
+        // Row 8: DONE / BACK (center)
         float doneW = 320.0f;
         float doneH = 40.0f;
         float doneX = cx - doneW * 0.5f;
-        float doneY = y0 + dy * 7.0f + 16.0f;
+        float doneY = y0 + dy * 8.0f + 10.0f;
         addRectButton(doneX, doneY, doneW, doneH, "DONE / BACK", inBox(doneX, doneY, doneW, doneH), true);
-
-        // Controls bar at bottom
-        std::string ctrlStr = "WASD: Move | F3: Debug Info | F5: Camera Mode | F7: Light Levels | ESC: Pause";
-        float ctrlW = FontRenderer::getTextWidth(ctrlStr, 12.0f);
-        FontRenderer::drawText(vertices, indices, ctrlStr, cx - ctrlW * 0.5f, sh - 24.0f, 12.0f, glm::vec3(0.75f, 0.75f, 0.75f), true);
 
     } else if (state == GameState::AudioSettings) {
         glm::vec4 dirtUV = TextureAtlas::getTileUV(2);
@@ -1111,6 +1274,82 @@ void MenuRenderer::rebuildMenuMesh(GameState state, const Player& player, uint32
         float doneX = cx - doneW * 0.5f;
         float doneY = y0 + dy * 3.5f;
         addRectButton(doneX, doneY, doneW, doneH, "DONE", inBox(doneX, doneY, doneW, doneH), true);
+
+    } else if (state == GameState::ControlsSettings) {
+        glm::vec4 dirtUV = TextureAtlas::getTileUV(2);
+        for (float by = 0; by < sh; by += 48.0f) {
+            for (float bpx = 0; bpx < sw; bpx += 48.0f) {
+                addTexturedQuad(bpx, by, 48.0f, 48.0f, dirtUV, glm::vec3(0.24f));
+            }
+        }
+
+        // Header "CONTROLS & KEYBINDINGS"
+        float titleBoxW = 460.0f;
+        addSolidQuad(cx - titleBoxW * 0.5f, cy - 220.0f, titleBoxW, 40.0f, glm::vec3(0.16f, 0.16f, 0.20f));
+        addSolidQuad(cx - titleBoxW * 0.5f, cy - 220.0f, titleBoxW, 3.0f, glm::vec3(0.95f, 0.75f, 0.20f));
+        std::string ctrlTitle = "CONTROLS & KEYBINDINGS";
+        float ctW = FontRenderer::getTextWidth(ctrlTitle, 20.0f);
+        FontRenderer::drawText(vertices, indices, ctrlTitle, cx - ctW * 0.5f, cy - 210.0f, 20.0f, glm::vec3(1.0f, 0.85f, 0.20f), true);
+
+        float bW = 260.0f;
+        float bH = 40.0f;
+        float lx = cx - 275.0f;
+        float rx = cx + 15.0f;
+        float y0 = cy - 160.0f;
+
+        auto inBox = [&](float bx_, float by_, float bw_, float bh_) {
+            return (mousePos.x >= bx_ && mousePos.x <= bx_ + bw_ && mousePos.y >= by_ && mousePos.y <= by_ + bh_);
+        };
+
+        // Mouse Sensitivity Slider
+        float sensRatio = std::clamp((options.mouseSens - 0.2f) / 2.8f, 0.0f, 1.0f);
+        char sensBuf[64];
+        std::snprintf(sensBuf, sizeof(sensBuf), "MOUSE SENS: %.2fx", options.mouseSens);
+        addSlider(lx, y0, bW, bH, sensRatio, sensBuf, inBox(lx, y0, bW, bH));
+
+        addRectButton(rx, y0, bW, bH, "INVERT MOUSE: OFF", inBox(rx, y0, bW, bH), false);
+
+        // Keybinding Reference Card
+        float cardW = 550.0f;
+        float cardH = 240.0f;
+        float cardX = cx - cardW * 0.5f;
+        float cardY = y0 + 55.0f;
+        addSolidQuad(cardX, cardY, cardW, cardH, glm::vec3(0.10f, 0.10f, 0.13f));
+        addSolidQuad(cardX, cardY, cardW, 2.0f, glm::vec3(0.40f, 0.45f, 0.55f));
+        addSolidQuad(cardX, cardY, 2.0f, cardH, glm::vec3(0.40f, 0.45f, 0.55f));
+        addSolidQuad(cardX, cardY + cardH - 2.0f, cardW, 2.0f, glm::vec3(0.06f, 0.06f, 0.08f));
+        addSolidQuad(cardX + cardW - 2.0f, cardY, 2.0f, cardH, glm::vec3(0.06f, 0.06f, 0.08f));
+
+        struct KeyRow { const char* key; const char* action; };
+        static const KeyRow rows[] = {
+            {"W / A / S / D", "Move Forward / Strafe Left / Back / Right"},
+            {"SPACEBAR", "Jump / Ascend Water"},
+            {"LEFT SHIFT / CTRL", "Sneak / Sprint"},
+            {"LEFT MOUSE CLICK", "Attack / Break Prism Block"},
+            {"RIGHT MOUSE CLICK", "Place Block / Use Item / Sword Block"},
+            {"MIDDLE MOUSE CLICK", "Pick Targeted Block"},
+            {"KEY [E] / [Q]", "Open Inventory / Drop Selected Item"},
+            {"KEY [F3] / [F5] / [F7]", "Debug Overlay / Camera View / Light Levels"}
+        };
+
+        for (int i = 0; i < 8; ++i) {
+            float ry = cardY + 12.0f + static_cast<float>(i) * 28.0f;
+            // Golden triangular pip
+            addTri(glm::vec3(cardX + 18.0f, ry + 7.0f, 0.0f),
+                   glm::vec3(cardX + 10.0f, ry + 2.0f, 0.0f),
+                   glm::vec3(cardX + 10.0f, ry + 12.0f, 0.0f),
+                   glm::vec3(0.95f, 0.80f, 0.25f));
+
+            FontRenderer::drawText(vertices, indices, rows[i].key, cardX + 24.0f, ry, 13.0f, glm::vec3(0.45f, 0.85f, 1.0f), true);
+            FontRenderer::drawText(vertices, indices, rows[i].action, cardX + 205.0f, ry, 13.0f, glm::vec3(0.90f, 0.90f, 0.90f), true);
+        }
+
+        // Done button
+        float doneW = 320.0f;
+        float doneH = 40.0f;
+        float doneX = cx - doneW * 0.5f;
+        float doneY = cardY + cardH + 16.0f;
+        addRectButton(doneX, doneY, doneW, doneH, "DONE / BACK", inBox(doneX, doneY, doneW, doneH), true);
 
     } else if (state == GameState::Paused) {
         // Authentic semi-transparent dark tint overlay (50% black, world remains clearly visible!)

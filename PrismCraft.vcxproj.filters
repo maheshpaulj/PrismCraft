@@ -63,6 +63,9 @@
     <ClCompile Include="src\rhi\VmaImpl.cpp">
       <Filter>src\rhi</Filter>
     </ClCompile>
+    <ClCompile Include="src\rhi\ShadowMap.cpp">
+      <Filter>src\rhi</Filter>
+    </ClCompile>
     <ClCompile Include="src\player\Camera.cpp">
       <Filter>src\player</Filter>
     </ClCompile>

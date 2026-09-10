@@ -110,22 +110,27 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
     const glm::vec3 nTop(0.0f, 1.0f, 0.0f);
     const glm::vec3 nBot(0.0f, -1.0f, 0.0f);
 
-    // Precompute top-most opaque voxel per column for block-to-block directional shadows
-    int maxOpaqueY[CHUNK_SIZE_X][CHUNK_SIZE_Z];
+    // Precompute top-most solid and leaf voxel per column for natural sunlight penetration
+    int maxSolidY[CHUNK_SIZE_X][CHUNK_SIZE_Z];
+    int maxLeafY[CHUNK_SIZE_X][CHUNK_SIZE_Z];
     std::vector<glm::vec3> chunkTorches;
 
     for (int x = 0; x < CHUNK_SIZE_X; ++x) {
         int wx = worldX + x;
         for (int z = 0; z < CHUNK_SIZE_Z; ++z) {
             int wz = worldZ + z;
-            maxOpaqueY[x][z] = -1;
+            maxSolidY[x][z] = -1;
+            maxLeafY[x][z] = -1;
             for (int y = CHUNK_SIZE_Y - 1; y >= 0; --y) {
                 Cell c0 = chunk.getCell(x, y, z, 0);
                 Cell c1 = chunk.getCell(x, y, z, 1);
                 if (c0.isTorch()) chunkTorches.push_back(cellToWorldCenter(wx, y, wz, 0));
                 if (c1.isTorch()) chunkTorches.push_back(cellToWorldCenter(wx, y, wz, 1));
-                if (maxOpaqueY[x][z] < 0 && (c0.isOpaque() || c1.isOpaque() || c0.type == BlockType::Leaves || c1.type == BlockType::Leaves)) {
-                    maxOpaqueY[x][z] = y;
+                if (maxSolidY[x][z] < 0 && (c0.isOpaque() || c1.isOpaque()) && c0.type != BlockType::Leaves && c1.type != BlockType::Leaves) {
+                    maxSolidY[x][z] = y;
+                }
+                if (maxLeafY[x][z] < 0 && (c0.type == BlockType::Leaves || c1.type == BlockType::Leaves)) {
+                    maxLeafY[x][z] = y;
                 }
             }
         }
@@ -138,21 +143,30 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
         if (y >= CHUNK_SIZE_Y - 1) return 1.0f;
 
         // 1. Column shadow with gradual diffusion under overhangs / ceilings
-        int roofY = (x >= 0 && x < CHUNK_SIZE_X && z >= 0 && z < CHUNK_SIZE_Z) ? maxOpaqueY[x][z] : -1;
-        if (roofY < 0) {
+        int solidRoofY = (x >= 0 && x < CHUNK_SIZE_X && z >= 0 && z < CHUNK_SIZE_Z) ? maxSolidY[x][z] : -1;
+        int leafRoofY  = (x >= 0 && x < CHUNK_SIZE_X && z >= 0 && z < CHUNK_SIZE_Z) ? maxLeafY[x][z]  : -1;
+        if (solidRoofY < 0 && leafRoofY < 0) {
             for (int sy = CHUNK_SIZE_Y - 1; sy >= y; --sy) {
                 Cell sc0 = getCellAtWorld(wx, sy, wz, 0);
                 Cell sc1 = getCellAtWorld(wx, sy, wz, 1);
-                if (sc0.isOpaque() || sc1.isOpaque() || sc0.type == BlockType::Leaves || sc1.type == BlockType::Leaves) {
-                    roofY = sy;
-                    break;
-                }
+                bool isLeaf = (sc0.type == BlockType::Leaves || sc1.type == BlockType::Leaves);
+                bool isOpaque = (sc0.isOpaque() || sc1.isOpaque());
+                if (solidRoofY < 0 && isOpaque && !isLeaf) solidRoofY = sy;
+                if (leafRoofY < 0 && isLeaf) leafRoofY = sy;
+                if (solidRoofY >= 0) break;
             }
         }
 
-        if (roofY > y) {
-            int depth = roofY - y;
-            return std::max(0.08f, 0.90f - depth * 0.16f); // Gradual skylight decay under overhangs
+        // Solid roof (caves, overhangs, buildings): full gradual skylight decay
+        if (solidRoofY > y) {
+            int depth = solidRoofY - y;
+            return std::max(0.04f, 0.85f - depth * 0.12f);
+        }
+
+        // Leaf canopy (trees): translucent foliage lets abundant ambient daylight through
+        if (leafRoofY > y) {
+            int depth = leafRoofY - y;
+            return std::max(0.65f, 0.95f - depth * 0.04f); // Under trees stays bright, soft, and realistic
         }
 
         // 2. Fast directional sunlight shadow check from sun elevation
@@ -162,14 +176,18 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
             int sx = x + step;
             int sz = z + step;
             if (sx >= 0 && sx < CHUNK_SIZE_X && sz >= 0 && sz < CHUNK_SIZE_Z) {
-                if (maxOpaqueY[sx][sz] >= sy) {
-                    return 0.12f; // Terrain blocks the sun at this angle
+                if (maxSolidY[sx][sz] >= sy) {
+                    return 0.15f; // Solid terrain blocks directional sun
+                }
+                if (maxLeafY[sx][sz] >= sy) {
+                    return 0.60f; // Dappled light filtering through leaf canopy
                 }
             } else {
                 Cell sc0 = getCellAtWorld(wx + step, sy, wz + step, 0);
                 Cell sc1 = getCellAtWorld(wx + step, sy, wz + step, 1);
-                if (sc0.isOpaque() || sc1.isOpaque() || sc0.type == BlockType::Leaves || sc1.type == BlockType::Leaves) {
-                    return 0.12f;
+                bool isLeaf = (sc0.type == BlockType::Leaves || sc1.type == BlockType::Leaves);
+                if (sc0.isOpaque() || sc1.isOpaque()) {
+                    return isLeaf ? 0.60f : 0.15f;
                 }
             }
         }
@@ -561,16 +579,20 @@ ChunkMesh ChunkMesher::generateLODMesh(const Chunk& chunk, LODLevel lod) {
         mesh.opaqueIndices.push_back(baseIdx + 0);
     };
 
-    auto addOpaqueTri = [&](const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
-                            const glm::vec2& uv0, const glm::vec2& uv1, const glm::vec2& uv2,
-                            const glm::vec3& normal, const glm::vec3& c) {
-        uint32_t baseIdx = static_cast<uint32_t>(mesh.opaqueVertices.size());
-        mesh.opaqueVertices.push_back({v0, uv0, normal, c});
-        mesh.opaqueVertices.push_back({v1, uv1, normal, c});
-        mesh.opaqueVertices.push_back({v2, uv2, normal, c});
-        mesh.opaqueIndices.push_back(baseIdx + 0);
-        mesh.opaqueIndices.push_back(baseIdx + 1);
-        mesh.opaqueIndices.push_back(baseIdx + 2);
+    auto addWaterQuad = [&](const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2, const glm::vec3& v3,
+                            const glm::vec4& uv, const glm::vec3& normal,
+                            const glm::vec3& c) {
+        uint32_t baseIdx = static_cast<uint32_t>(mesh.waterVertices.size());
+        mesh.waterVertices.push_back({v0, glm::vec2(uv.x, uv.w), normal, c});
+        mesh.waterVertices.push_back({v1, glm::vec2(uv.x, uv.y), normal, c});
+        mesh.waterVertices.push_back({v2, glm::vec2(uv.z, uv.y), normal, c});
+        mesh.waterVertices.push_back({v3, glm::vec2(uv.z, uv.w), normal, c});
+        mesh.waterIndices.push_back(baseIdx + 0);
+        mesh.waterIndices.push_back(baseIdx + 1);
+        mesh.waterIndices.push_back(baseIdx + 2);
+        mesh.waterIndices.push_back(baseIdx + 2);
+        mesh.waterIndices.push_back(baseIdx + 3);
+        mesh.waterIndices.push_back(baseIdx + 0);
     };
 
     auto addWaterTri = [&](const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
@@ -587,113 +609,221 @@ ChunkMesh ChunkMesher::generateLODMesh(const Chunk& chunk, LODLevel lod) {
 
     const glm::vec3 nTop(0.0f, 1.0f, 0.0f);
     const float fStep = static_cast<float>(step);
-    const float halfStep = fStep * 0.5f;
 
-    // Grid of heights to detect height drops between adjacent coarse cells
-    int heightGrid[16][16];
-    BlockType typeGrid[16][16];
+    // 1. Scan column heights for solid terrain and water presence
+    int solidHeightGrid[16][16];
+    BlockType solidTypeGrid[16][16];
+    bool hasWaterGrid[16][16];
+
     for (int x = 0; x < CHUNK_SIZE_X; x += step) {
         for (int z = 0; z < CHUNK_SIZE_Z; z += step) {
             int topY = -1;
             BlockType topType = BlockType::Air;
+            bool hasWater = false;
+
             for (int dx = 0; dx < step; ++dx) {
                 for (int dz = 0; dz < step; ++dz) {
                     for (int y = CHUNK_SIZE_Y - 1; y >= 0; --y) {
                         Cell c0 = chunk.getCell(x + dx, y, z + dz, 0);
                         Cell c1 = chunk.getCell(x + dx, y, z + dz, 1);
-                        if (c0.isSolid() || c0.type == BlockType::Water) {
+                        if (c0.type == BlockType::Water || c1.type == BlockType::Water) {
+                            hasWater = true;
+                        }
+                        if (c0.isSolid()) {
                             if (y > topY) { topY = y; topType = c0.type; }
                             break;
                         }
-                        if (c1.isSolid() || c1.type == BlockType::Water) {
+                        if (c1.isSolid()) {
                             if (y > topY) { topY = y; topType = c1.type; }
                             break;
                         }
                     }
                 }
             }
-            heightGrid[x][z] = topY;
-            typeGrid[x][z] = topType;
+            solidHeightGrid[x][z] = topY;
+            solidTypeGrid[x][z] = (topY >= 0) ? topType : BlockType::Dirt;
+            hasWaterGrid[x][z] = hasWater || (topY >= 0 && topY < 44);
         }
     }
 
+    // 2. Emit Solid Terrain Top Quads and Water Top Quads
     for (int lx = 0; lx < CHUNK_SIZE_X; lx += step) {
         for (int lz = 0; lz < CHUNK_SIZE_Z; lz += step) {
-            int topY = heightGrid[lx][lz];
-            if (topY < 0) continue;
-            BlockType topType = typeGrid[lx][lz];
+            int wx = worldX + lx;
+            int wz = worldZ + lz;
+            float x0 = static_cast<float>(wx) + getRowXOffset(wz);
+            float x1 = x0 + fStep;
+            float z0 = static_cast<float>(wz) * TRI_HEIGHT;
+            float z1 = static_cast<float>(wz + step) * TRI_HEIGHT;
+
+            // A. Solid Terrain (Seabed or ground)
+            int solidY = solidHeightGrid[lx][lz];
+            if (solidY >= 0) {
+                BlockType solidType = solidTypeGrid[lx][lz];
+                float py = static_cast<float>(solidY);
+                glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(solidType, 0));
+                glm::vec3 v0(x0, py + 1.0f, z0);
+                glm::vec3 v1(x0, py + 1.0f, z1);
+                glm::vec3 v2(x1, py + 1.0f, z1);
+                glm::vec3 v3(x1, py + 1.0f, z0);
+                addOpaqueQuad(v0, v1, v2, v3, uv, nTop, glm::vec3(1.0f, 1.0f, 0.0f));
+
+                // Outer chunk border skirts for solid ground
+                glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(solidType, 2));
+                float skirtDepth = std::max(12.0f, py - 32.0f);
+
+                if (lz == 0) {
+                    glm::vec3 vB0(x0, py + 1.0f - skirtDepth, z0);
+                    glm::vec3 vT0(x0, py + 1.0f, z0);
+                    glm::vec3 vT1(x1, py + 1.0f, z0);
+                    glm::vec3 vB1(x1, py + 1.0f - skirtDepth, z0);
+                    addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
+                }
+                if (lz + step >= CHUNK_SIZE_Z) {
+                    glm::vec3 vB0(x1, py + 1.0f - skirtDepth, z1);
+                    glm::vec3 vT0(x1, py + 1.0f, z1);
+                    glm::vec3 vT1(x0, py + 1.0f, z1);
+                    glm::vec3 vB1(x0, py + 1.0f - skirtDepth, z1);
+                    addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
+                }
+                if (lx == 0) {
+                    glm::vec3 vB0(x0, py + 1.0f - skirtDepth, z1);
+                    glm::vec3 vT0(x0, py + 1.0f, z1);
+                    glm::vec3 vT1(x0, py + 1.0f, z0);
+                    glm::vec3 vB1(x0, py + 1.0f - skirtDepth, z0);
+                    addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.65f, 0.0f));
+                }
+                if (lx + step >= CHUNK_SIZE_X) {
+                    glm::vec3 vB0(x1, py + 1.0f - skirtDepth, z0);
+                    glm::vec3 vT0(x1, py + 1.0f, z0);
+                    glm::vec3 vT1(x1, py + 1.0f, z1);
+                    glm::vec3 vB1(x1, py + 1.0f - skirtDepth, z1);
+                    addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.72f, 0.0f));
+                }
+            }
+        }
+    }
+
+    // B. Water Surface: Exact equilateral triangular mesh matching LOD0 perfectly at Y = 45.0f
+    // Every column with water produces identical vertices to LOD0, guaranteeing 100% gapless stitching!
+    for (int clx = 0; clx < CHUNK_SIZE_X; ++clx) {
+        for (int clz = 0; clz < CHUNK_SIZE_Z; ++clz) {
+            for (int s = 0; s < 2; ++s) {
+                Cell cell = chunk.getCell(clx, 44, clz, s);
+                bool hasWaterHere = (cell.type == BlockType::Water);
+                if (!hasWaterHere) {
+                    for (int wy = 43; wy >= 24; --wy) {
+                        if (chunk.getCell(clx, wy, clz, s).type == BlockType::Water) {
+                            hasWaterHere = true;
+                            break;
+                        }
+                    }
+                }
+                if (!hasWaterHere) continue;
+
+                // If cell above is water or solid, top face is covered
+                Cell cAbove = chunk.getCell(clx, 45, clz, s);
+                if (cAbove.type == BlockType::Water || cAbove.isSolid()) continue;
+
+                glm::vec2 vXZ[3];
+                getPrismVerticesXZ(worldX + clx, worldZ + clz, s, vXZ);
+
+                float waterY = 44.0f;
+                glm::vec3 T0(vXZ[0].x, waterY + 1.0f, vXZ[0].y);
+                glm::vec3 T1(vXZ[1].x, waterY + 1.0f, vXZ[1].y);
+                glm::vec3 T2(vXZ[2].x, waterY + 1.0f, vXZ[2].y);
+
+                glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(BlockType::Water, 0));
+                float uMid = uv.x + (uv.z - uv.x) * 0.5f;
+                glm::vec2 uvT0, uvT1, uvT2;
+                if (s == 0) {
+                    uvT0 = glm::vec2(uv.x, uv.w);
+                    uvT1 = glm::vec2(uv.z, uv.w);
+                    uvT2 = glm::vec2(uMid, uv.y);
+                } else {
+                    uvT0 = glm::vec2(uMid, uv.w);
+                    uvT1 = glm::vec2(uv.z, uv.y);
+                    uvT2 = glm::vec2(uv.x, uv.y);
+                }
+
+                float depthFactor = 0.65f;
+                for (int sy = 43; sy >= 0; --sy) {
+                    if (chunk.getCell(clx, sy, clz, s).isSolid()) {
+                        depthFactor = std::clamp((44.0f - static_cast<float>(sy)) / 7.0f, 0.1f, 1.0f);
+                        break;
+                    }
+                }
+
+                glm::vec3 waterCol(depthFactor, 1.0f, 0.0f);
+                addWaterTri(T0, T2, T1, uvT0, uvT2, uvT1, nTop, waterCol);
+            }
+        }
+    }
+
+    // 3. Internal Height Skirts for Solid Terrain (prevents see-through holes between uneven solid voxels)
+    // A. Skirts between adjacent cells in X
+    for (int lz = 0; lz < CHUNK_SIZE_Z; lz += step) {
+        int wz = worldZ + lz;
+        float z0 = static_cast<float>(wz) * TRI_HEIGHT;
+        float z1 = static_cast<float>(wz + step) * TRI_HEIGHT;
+
+        for (int lx = 0; lx < CHUNK_SIZE_X - step; lx += step) {
+            int yA = solidHeightGrid[lx][lz];
+            int yB = solidHeightGrid[lx + step][lz];
+            if (yA < 0 || yB < 0 || yA == yB) continue;
+
+            int wx = worldX + lx;
+            float x1 = static_cast<float>(wx) + getRowXOffset(wz) + fStep;
+
+            if (yA > yB) {
+                BlockType bType = solidTypeGrid[lx][lz];
+                glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
+                glm::vec3 v0(x1, static_cast<float>(yB) + 1.0f, z0);
+                glm::vec3 v1(x1, static_cast<float>(yA) + 1.0f, z0);
+                glm::vec3 v2(x1, static_cast<float>(yA) + 1.0f, z1);
+                glm::vec3 v3(x1, static_cast<float>(yB) + 1.0f, z1);
+                addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.72f, 0.0f));
+            } else {
+                BlockType bType = solidTypeGrid[lx + step][lz];
+                glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
+                glm::vec3 v0(x1, static_cast<float>(yA) + 1.0f, z1);
+                glm::vec3 v1(x1, static_cast<float>(yB) + 1.0f, z1);
+                glm::vec3 v2(x1, static_cast<float>(yB) + 1.0f, z0);
+                glm::vec3 v3(x1, static_cast<float>(yA) + 1.0f, z0);
+                addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.65f, 0.0f));
+            }
+        }
+    }
+
+    // B. Skirts between adjacent cells in Z
+    for (int lx = 0; lx < CHUNK_SIZE_X; lx += step) {
+        for (int lz = 0; lz < CHUNK_SIZE_Z - step; lz += step) {
+            int yA = solidHeightGrid[lx][lz];
+            int yC = solidHeightGrid[lx][lz + step];
+            if (yA < 0 || yC < 0 || yA == yC) continue;
 
             int wx = worldX + lx;
             int wz = worldZ + lz;
             float x0 = static_cast<float>(wx) + getRowXOffset(wz);
-            float z0 = static_cast<float>(wz) * TRI_HEIGHT;
+            float x1 = x0 + fStep;
             float z1 = static_cast<float>(wz + step) * TRI_HEIGHT;
-            float py = static_cast<float>(topY);
 
-            glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(topType, 0));
-            float uMid = uv.x + (uv.z - uv.x) * 0.5f;
-            glm::vec3 litColor(1.0f, 1.0f, 0.0f); // Full sunlight, 1.0 AO, 0.0 torch
-
-            // s = 0 (UP triangle)
-            glm::vec3 T0_s0(x0, py + 1.0f, z0);
-            glm::vec3 T1_s0(x0 + fStep, py + 1.0f, z0);
-            glm::vec3 T2_s0(x0 + halfStep, py + 1.0f, z1);
-            glm::vec2 uv0_s0(uv.x, uv.w);
-            glm::vec2 uv1_s0(uv.z, uv.w);
-            glm::vec2 uv2_s0(uMid, uv.y);
-
-            // s = 1 (DOWN triangle)
-            glm::vec3 T0_s1(x0 + fStep, py + 1.0f, z0);
-            glm::vec3 T1_s1(x0 + fStep + halfStep, py + 1.0f, z1);
-            glm::vec3 T2_s1(x0 + halfStep, py + 1.0f, z1);
-            glm::vec2 uv0_s1(uMid, uv.w);
-            glm::vec2 uv1_s1(uv.z, uv.y);
-            glm::vec2 uv2_s1(uv.x, uv.y);
-
-            if (topType == BlockType::Water) {
-                glm::vec3 waterCol(0.5f, 1.0f, 0.0f);
-                addWaterTri(T0_s0, T2_s0, T1_s0, uv0_s0, uv2_s0, uv1_s0, nTop, waterCol);
-                addWaterTri(T0_s1, T2_s1, T1_s1, uv0_s1, uv2_s1, uv1_s1, nTop, waterCol);
+            if (yA > yC) {
+                BlockType bType = solidTypeGrid[lx][lz];
+                glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
+                glm::vec3 v0(x1, static_cast<float>(yC) + 1.0f, z1);
+                glm::vec3 v1(x1, static_cast<float>(yA) + 1.0f, z1);
+                glm::vec3 v2(x0, static_cast<float>(yA) + 1.0f, z1);
+                glm::vec3 v3(x0, static_cast<float>(yC) + 1.0f, z1);
+                addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
             } else {
-                addOpaqueTri(T0_s0, T2_s0, T1_s0, uv0_s0, uv2_s0, uv1_s0, nTop, litColor);
-                addOpaqueTri(T0_s1, T2_s1, T1_s1, uv0_s1, uv2_s1, uv1_s1, nTop, litColor);
-            }
-
-            // Boundary and step skirts to prevent T-junction crack slivers
-            glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(topType, 2));
-            float skirtDepth = 2.0f;
-
-            // South boundary (lz == 0, Base Wall: 0.80)
-            if (lz == 0) {
-                glm::vec3 vB0(x0, py + 1.0f - skirtDepth, z0);
-                glm::vec3 vT0(x0, py + 1.0f, z0);
-                glm::vec3 vT1(x0 + fStep, py + 1.0f, z0);
-                glm::vec3 vB1(x0 + fStep, py + 1.0f - skirtDepth, z0);
-                addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
-            }
-            // North boundary (lz + step >= CHUNK_SIZE_Z, Base Wall: 0.80)
-            if (lz + step >= CHUNK_SIZE_Z) {
-                glm::vec3 vB0(x0 + fStep + halfStep, py + 1.0f - skirtDepth, z1);
-                glm::vec3 vT0(x0 + fStep + halfStep, py + 1.0f, z1);
-                glm::vec3 vT1(x0 + halfStep, py + 1.0f, z1);
-                glm::vec3 vB1(x0 + halfStep, py + 1.0f - skirtDepth, z1);
-                addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
-            }
-            // West boundary (lx == 0, Left Slanted: 0.65)
-            if (lx == 0) {
-                glm::vec3 vB0(x0 + halfStep, py + 1.0f - skirtDepth, z1);
-                glm::vec3 vT0(x0 + halfStep, py + 1.0f, z1);
-                glm::vec3 vT1(x0, py + 1.0f, z0);
-                glm::vec3 vB1(x0, py + 1.0f - skirtDepth, z0);
-                addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(-SQRT_3_OVER_2, 0.0f, 0.5f), glm::vec3(1.0f, 0.65f, 0.0f));
-            }
-            // East boundary (lx + step >= CHUNK_SIZE_X, Right Slanted: 0.72)
-            if (lx + step >= CHUNK_SIZE_X) {
-                glm::vec3 vB0(x0 + fStep, py + 1.0f - skirtDepth, z0);
-                glm::vec3 vT0(x0 + fStep, py + 1.0f, z0);
-                glm::vec3 vT1(x0 + fStep + halfStep, py + 1.0f, z1);
-                glm::vec3 vB1(x0 + fStep + halfStep, py + 1.0f - skirtDepth, z1);
-                addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(SQRT_3_OVER_2, 0.0f, 0.5f), glm::vec3(1.0f, 0.72f, 0.0f));
+                BlockType bType = solidTypeGrid[lx][lz + step];
+                glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
+                glm::vec3 v0(x0, static_cast<float>(yA) + 1.0f, z1);
+                glm::vec3 v1(x0, static_cast<float>(yC) + 1.0f, z1);
+                glm::vec3 v2(x1, static_cast<float>(yC) + 1.0f, z1);
+                glm::vec3 v3(x1, static_cast<float>(yA) + 1.0f, z1);
+                addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
             }
         }
     }
@@ -706,16 +836,20 @@ ChunkMesh ChunkMesher::generateImposterMesh(const ChunkCoord& coord, const Terra
     int worldX = coord.cx * CHUNK_SIZE_X;
     int worldZ = coord.cz * CHUNK_SIZE_Z;
 
-    auto addOpaqueTri = [&](const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
-                            const glm::vec2& uv0, const glm::vec2& uv1, const glm::vec2& uv2,
-                            const glm::vec3& normal, const glm::vec3& c) {
+    auto addOpaqueQuad = [&](const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2, const glm::vec3& v3,
+                             const glm::vec4& uv, const glm::vec3& normal,
+                             const glm::vec3& c) {
         uint32_t baseIdx = static_cast<uint32_t>(mesh.opaqueVertices.size());
-        mesh.opaqueVertices.push_back({v0, uv0, normal, c});
-        mesh.opaqueVertices.push_back({v1, uv1, normal, c});
-        mesh.opaqueVertices.push_back({v2, uv2, normal, c});
+        mesh.opaqueVertices.push_back({v0, glm::vec2(uv.x, uv.w), normal, c});
+        mesh.opaqueVertices.push_back({v1, glm::vec2(uv.x, uv.y), normal, c});
+        mesh.opaqueVertices.push_back({v2, glm::vec2(uv.z, uv.y), normal, c});
+        mesh.opaqueVertices.push_back({v3, glm::vec2(uv.z, uv.w), normal, c});
         mesh.opaqueIndices.push_back(baseIdx + 0);
         mesh.opaqueIndices.push_back(baseIdx + 1);
         mesh.opaqueIndices.push_back(baseIdx + 2);
+        mesh.opaqueIndices.push_back(baseIdx + 2);
+        mesh.opaqueIndices.push_back(baseIdx + 3);
+        mesh.opaqueIndices.push_back(baseIdx + 0);
     };
 
     auto addWaterTri = [&](const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
@@ -730,56 +864,210 @@ ChunkMesh ChunkMesher::generateImposterMesh(const ChunkCoord& coord, const Terra
         mesh.waterIndices.push_back(baseIdx + 2);
     };
 
+    auto addWaterQuad = [&](const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2, const glm::vec3& v3,
+                            const glm::vec4& uv, const glm::vec3& normal,
+                            const glm::vec3& c) {
+        uint32_t baseIdx = static_cast<uint32_t>(mesh.waterVertices.size());
+        mesh.waterVertices.push_back({v0, glm::vec2(uv.x, uv.w), normal, c});
+        mesh.waterVertices.push_back({v1, glm::vec2(uv.x, uv.y), normal, c});
+        mesh.waterVertices.push_back({v2, glm::vec2(uv.z, uv.y), normal, c});
+        mesh.waterVertices.push_back({v3, glm::vec2(uv.z, uv.w), normal, c});
+        mesh.waterIndices.push_back(baseIdx + 0);
+        mesh.waterIndices.push_back(baseIdx + 1);
+        mesh.waterIndices.push_back(baseIdx + 2);
+        mesh.waterIndices.push_back(baseIdx + 2);
+        mesh.waterIndices.push_back(baseIdx + 3);
+        mesh.waterIndices.push_back(baseIdx + 0);
+    };
+
     const glm::vec3 nTop(0.0f, 1.0f, 0.0f);
-    const int step = 8; // 2x2 coarse cells per chunk (8 triangles total!)
+    const int step = 8; // 2x2 coarse cells per chunk
     const float fStep = static_cast<float>(step);
-    const float halfStep = fStep * 0.5f;
+
+    int solidHeightGrid[16][16];
+    BlockType solidTypeGrid[16][16];
+    bool hasWaterGrid[16][16];
 
     for (int lx = 0; lx < CHUNK_SIZE_X; lx += step) {
         for (int lz = 0; lz < CHUNK_SIZE_Z; lz += step) {
+            int topY = -1;
+            BlockType topType = BlockType::Air;
+            bool hasWater = false;
+
+            for (int dx = 0; dx < step; ++dx) {
+                for (int dz = 0; dz < step; ++dz) {
+                    int wx = worldX + lx + dx;
+                    int wz = worldZ + lz + dz;
+                    int h = terrainGen.getHeight(wx, wz);
+                    if (h <= 44) {
+                        hasWater = true;
+                    }
+                    if (h > topY) {
+                        topY = h;
+                        if (h <= 44) topType = BlockType::Sand;
+                        else if (h <= 46) topType = BlockType::Sand;
+                        else if (h >= 74) topType = BlockType::Snow;
+                        else topType = BlockType::Grass;
+                    }
+                }
+            }
+            solidHeightGrid[lx][lz] = (topY <= 44) ? std::min(topY, 41) : topY;
+            solidTypeGrid[lx][lz] = (topY <= 44) ? BlockType::Sand : topType;
+            hasWaterGrid[lx][lz] = hasWater;
+        }
+    }
+
+    // 1. Solid Terrain Surface Quads
+    for (int lx = 0; lx < CHUNK_SIZE_X; lx += step) {
+        for (int lz = 0; lz < CHUNK_SIZE_Z; lz += step) {
+            int topY = solidHeightGrid[lx][lz];
+            BlockType solidType = solidTypeGrid[lx][lz];
+
             int wx = worldX + lx;
             int wz = worldZ + lz;
-
-            int rawH = terrainGen.getHeight(wx + step / 2, wz + step / 2);
-            bool isWater = (rawH <= 44);
-            float py = isWater ? 44.0f : static_cast<float>(rawH);
-
-            BlockType bType = BlockType::Grass;
-            if (isWater) bType = BlockType::Water;
-            else if (rawH <= 46) bType = BlockType::Sand;
-            else if (rawH >= 74) bType = BlockType::Snow;
-
             float x0 = static_cast<float>(wx) + getRowXOffset(wz);
+            float x1 = x0 + fStep;
             float z0 = static_cast<float>(wz) * TRI_HEIGHT;
             float z1 = static_cast<float>(wz + step) * TRI_HEIGHT;
+            float py = static_cast<float>(topY);
 
-            glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 0));
-            float uMid = uv.x + (uv.z - uv.x) * 0.5f;
-            glm::vec3 litColor(1.0f, 1.0f, 0.0f);
+            // A. Solid Terrain (Ground / Seabed)
+            glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(solidType, 0));
+            glm::vec3 v0(x0, py + 1.0f, z0);
+            glm::vec3 v1(x0, py + 1.0f, z1);
+            glm::vec3 v2(x1, py + 1.0f, z1);
+            glm::vec3 v3(x1, py + 1.0f, z0);
+            addOpaqueQuad(v0, v1, v2, v3, uv, nTop, glm::vec3(1.0f, 1.0f, 0.0f));
 
-            // s = 0
-            glm::vec3 T0_s0(x0, py + 1.0f, z0);
-            glm::vec3 T1_s0(x0 + fStep, py + 1.0f, z0);
-            glm::vec3 T2_s0(x0 + halfStep, py + 1.0f, z1);
-            glm::vec2 uv0_s0(uv.x, uv.w);
-            glm::vec2 uv1_s0(uv.z, uv.w);
-            glm::vec2 uv2_s0(uMid, uv.y);
+            // Generous border skirts down towards sea level so imposter solid terrain never floats
+            glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(solidType, 2));
+            float skirtDepth = std::max(16.0f, py - 28.0f);
 
-            // s = 1
-            glm::vec3 T0_s1(x0 + fStep, py + 1.0f, z0);
-            glm::vec3 T1_s1(x0 + fStep + halfStep, py + 1.0f, z1);
-            glm::vec3 T2_s1(x0 + halfStep, py + 1.0f, z1);
-            glm::vec2 uv0_s1(uMid, uv.w);
-            glm::vec2 uv1_s1(uv.z, uv.y);
-            glm::vec2 uv2_s1(uv.x, uv.y);
+            if (lz == 0) {
+                glm::vec3 vB0(x0, py + 1.0f - skirtDepth, z0);
+                glm::vec3 vT0(x0, py + 1.0f, z0);
+                glm::vec3 vT1(x1, py + 1.0f, z0);
+                glm::vec3 vB1(x1, py + 1.0f - skirtDepth, z0);
+                addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
+            }
+            if (lz + step >= CHUNK_SIZE_Z) {
+                glm::vec3 vB0(x1, py + 1.0f - skirtDepth, z1);
+                glm::vec3 vT0(x1, py + 1.0f, z1);
+                glm::vec3 vT1(x0, py + 1.0f, z1);
+                glm::vec3 vB1(x0, py + 1.0f - skirtDepth, z1);
+                addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
+            }
+            if (lx == 0) {
+                glm::vec3 vB0(x0, py + 1.0f - skirtDepth, z1);
+                glm::vec3 vT0(x0, py + 1.0f, z1);
+                glm::vec3 vT1(x0, py + 1.0f, z0);
+                glm::vec3 vB1(x0, py + 1.0f - skirtDepth, z0);
+                addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.65f, 0.0f));
+            }
+            if (lx + step >= CHUNK_SIZE_X) {
+                glm::vec3 vB0(x1, py + 1.0f - skirtDepth, z0);
+                glm::vec3 vT0(x1, py + 1.0f, z0);
+                glm::vec3 vT1(x1, py + 1.0f, z1);
+                glm::vec3 vB1(x1, py + 1.0f - skirtDepth, z1);
+                addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.72f, 0.0f));
+            }
+        }
+    }
 
-            if (isWater) {
-                glm::vec3 waterCol(0.5f, 1.0f, 0.0f);
-                addWaterTri(T0_s0, T2_s0, T1_s0, uv0_s0, uv2_s0, uv1_s0, nTop, waterCol);
-                addWaterTri(T0_s1, T2_s1, T1_s1, uv0_s1, uv2_s1, uv1_s1, nTop, waterCol);
+    // B. Water Surface: Exact equilateral triangular mesh matching LOD0 and nearby chunks at Y = 45.0f
+    for (int clx = 0; clx < CHUNK_SIZE_X; ++clx) {
+        for (int clz = 0; clz < CHUNK_SIZE_Z; ++clz) {
+            int wx = worldX + clx;
+            int wz = worldZ + clz;
+            int h = terrainGen.getHeight(wx, wz);
+            if (h <= 44) {
+                for (int s = 0; s < 2; ++s) {
+                    glm::vec2 vXZ[3];
+                    getPrismVerticesXZ(wx, wz, s, vXZ);
+
+                    float waterY = 44.0f;
+                    glm::vec3 T0(vXZ[0].x, waterY + 1.0f, vXZ[0].y);
+                    glm::vec3 T1(vXZ[1].x, waterY + 1.0f, vXZ[1].y);
+                    glm::vec3 T2(vXZ[2].x, waterY + 1.0f, vXZ[2].y);
+
+                    glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(BlockType::Water, 0));
+                    float uMid = uv.x + (uv.z - uv.x) * 0.5f;
+                    glm::vec2 uvT0, uvT1, uvT2;
+                    if (s == 0) {
+                        uvT0 = glm::vec2(uv.x, uv.w);
+                        uvT1 = glm::vec2(uv.z, uv.w);
+                        uvT2 = glm::vec2(uMid, uv.y);
+                    } else {
+                        uvT0 = glm::vec2(uMid, uv.w);
+                        uvT1 = glm::vec2(uv.z, uv.y);
+                        uvT2 = glm::vec2(uv.x, uv.y);
+                    }
+
+                    float depthFactor = std::clamp((44.0f - static_cast<float>(h)) / 7.0f, 0.1f, 1.0f);
+                    glm::vec3 waterCol(depthFactor, 1.0f, 0.0f);
+                    addWaterTri(T0, T2, T1, uvT0, uvT2, uvT1, nTop, waterCol);
+                }
+            }
+        }
+    }
+
+    // 2. Internal Height Skirts between 8x8 coarse cells for Solid Terrain
+    // X boundary between (0, lz) and (8, lz)
+    for (int lz = 0; lz < CHUNK_SIZE_Z; lz += step) {
+        int yA = solidHeightGrid[0][lz];
+        int yB = solidHeightGrid[8][lz];
+        if (yA != yB) {
+            int wz = worldZ + lz;
+            float z0 = static_cast<float>(wz) * TRI_HEIGHT;
+            float z1 = static_cast<float>(wz + step) * TRI_HEIGHT;
+            float x1 = static_cast<float>(worldX) + getRowXOffset(wz) + fStep;
+
+            if (yA > yB) {
+                BlockType bType = solidTypeGrid[0][lz];
+                glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
+                glm::vec3 v0(x1, static_cast<float>(yB) + 1.0f, z0);
+                glm::vec3 v1(x1, static_cast<float>(yA) + 1.0f, z0);
+                glm::vec3 v2(x1, static_cast<float>(yA) + 1.0f, z1);
+                glm::vec3 v3(x1, static_cast<float>(yB) + 1.0f, z1);
+                addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.72f, 0.0f));
             } else {
-                addOpaqueTri(T0_s0, T2_s0, T1_s0, uv0_s0, uv2_s0, uv1_s0, nTop, litColor);
-                addOpaqueTri(T0_s1, T2_s1, T1_s1, uv0_s1, uv2_s1, uv1_s1, nTop, litColor);
+                BlockType bType = solidTypeGrid[8][lz];
+                glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
+                glm::vec3 v0(x1, static_cast<float>(yA) + 1.0f, z1);
+                glm::vec3 v1(x1, static_cast<float>(yB) + 1.0f, z1);
+                glm::vec3 v2(x1, static_cast<float>(yB) + 1.0f, z0);
+                glm::vec3 v3(x1, static_cast<float>(yA) + 1.0f, z0);
+                addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.65f, 0.0f));
+            }
+        }
+    }
+
+    // Z boundary between (lx, 0) and (lx, 8)
+    for (int lx = 0; lx < CHUNK_SIZE_X; lx += step) {
+        int yA = solidHeightGrid[lx][0];
+        int yC = solidHeightGrid[lx][8];
+        if (yA != yC) {
+            int wx = worldX + lx;
+            float x0 = static_cast<float>(wx) + getRowXOffset(worldZ);
+            float x1 = x0 + fStep;
+            float z1 = static_cast<float>(worldZ + step) * TRI_HEIGHT;
+
+            if (yA > yC) {
+                BlockType bType = solidTypeGrid[lx][0];
+                glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
+                glm::vec3 v0(x1, static_cast<float>(yC) + 1.0f, z1);
+                glm::vec3 v1(x1, static_cast<float>(yA) + 1.0f, z1);
+                glm::vec3 v2(x0, static_cast<float>(yA) + 1.0f, z1);
+                glm::vec3 v3(x0, static_cast<float>(yC) + 1.0f, z1);
+                addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
+            } else {
+                BlockType bType = solidTypeGrid[lx][8];
+                glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
+                glm::vec3 v0(x0, static_cast<float>(yA) + 1.0f, z1);
+                glm::vec3 v1(x0, static_cast<float>(yC) + 1.0f, z1);
+                glm::vec3 v2(x1, static_cast<float>(yC) + 1.0f, z1);
+                glm::vec3 v3(x1, static_cast<float>(yA) + 1.0f, z1);
+                addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
             }
         }
     }

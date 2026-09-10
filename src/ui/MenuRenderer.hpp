@@ -23,7 +23,9 @@ enum class GameState {
     CraftingTable,
     Paused,
     Options,
+    VideoSettings,
     AudioSettings,
+    ControlsSettings,
     Death
 };
 

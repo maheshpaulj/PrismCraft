@@ -9,6 +9,7 @@
 #include "rhi/Pipeline.hpp"
 #include "rhi/Buffer.hpp"
 #include "rhi/Texture.hpp"
+#include "rhi/ShadowMap.hpp"
 #include "player/Player.hpp"
 #include "player/Raycast.hpp"
 #include "world/World.hpp"
@@ -131,25 +132,148 @@ void run() {
     VkDescriptorSetLayout descLayout = textureAtlas.getDescriptorSetLayout();
     VkDescriptorSet descSet = textureAtlas.getDescriptorSet();
 
+    struct ShadowUBO {
+        glm::mat4 lightViewProj[2];
+        glm::vec4 cascadeSplits;
+    };
+
+    ShadowMap shadowMap(context);
+
+    // Initial transition of shadow map to shader read-only so descriptor sets and samplers are always valid
+    {
+        VkCommandBuffer initCmd = commandQueue.beginSingleTimeCommands();
+        shadowMap.transitionForSampling(initCmd);
+        commandQueue.endSingleTimeCommands(initCmd);
+    }
+
+    Buffer shadowUboBuffers[MAX_FRAMES_IN_FLIGHT];
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        shadowUboBuffers[i] = Buffer(context, sizeof(ShadowUBO),
+                                    VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                                    VMA_MEMORY_USAGE_CPU_TO_GPU);
+    }
+
+    // Scene Descriptor Set Layout: binding 0 = Atlas, binding 1 = ShadowMap array, binding 2 = ShadowUBO
+    VkDescriptorSetLayoutBinding sceneBindings[3]{};
+    sceneBindings[0].binding = 0;
+    sceneBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    sceneBindings[0].descriptorCount = 1;
+    sceneBindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    sceneBindings[1].binding = 1;
+    sceneBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    sceneBindings[1].descriptorCount = 1;
+    sceneBindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    sceneBindings[2].binding = 2;
+    sceneBindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    sceneBindings[2].descriptorCount = 1;
+    sceneBindings[2].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo sceneLayoutInfo{};
+    sceneLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    sceneLayoutInfo.bindingCount = 3;
+    sceneLayoutInfo.pBindings = sceneBindings;
+
+    VkDescriptorSetLayout sceneDescLayout = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorSetLayout(context.getDevice(), &sceneLayoutInfo, nullptr, &sceneDescLayout),
+             "Failed to create scene descriptor set layout!");
+
+    // Descriptor pool for scene descriptor sets
+    VkDescriptorPoolSize poolSizes[2]{};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSizes[0].descriptorCount = 2 * MAX_FRAMES_IN_FLIGHT;
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT;
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = 2;
+    poolInfo.pPoolSizes = poolSizes;
+    poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
+
+    VkDescriptorPool sceneDescPool = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorPool(context.getDevice(), &poolInfo, nullptr, &sceneDescPool),
+             "Failed to create scene descriptor pool!");
+
+    std::vector<VkDescriptorSetLayout> sceneLayouts(MAX_FRAMES_IN_FLIGHT, sceneDescLayout);
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = sceneDescPool;
+    allocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+    allocInfo.pSetLayouts = sceneLayouts.data();
+
+    VkDescriptorSet sceneDescSets[MAX_FRAMES_IN_FLIGHT]{};
+    VK_CHECK(vkAllocateDescriptorSets(context.getDevice(), &allocInfo, sceneDescSets),
+             "Failed to allocate scene descriptor sets!");
+
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        VkDescriptorImageInfo atlasImageInfo{};
+        atlasImageInfo.sampler = textureAtlas.getSampler();
+        atlasImageInfo.imageView = textureAtlas.getImageView();
+        atlasImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkDescriptorImageInfo shadowImageInfo{};
+        shadowImageInfo.sampler = shadowMap.getSampler();
+        shadowImageInfo.imageView = shadowMap.getArrayImageView();
+        shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkDescriptorBufferInfo uboInfo{};
+        uboInfo.buffer = shadowUboBuffers[i].getBuffer();
+        uboInfo.offset = 0;
+        uboInfo.range = sizeof(ShadowUBO);
+
+        VkWriteDescriptorSet writes[3]{};
+        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet = sceneDescSets[i];
+        writes[0].dstBinding = 0;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[0].descriptorCount = 1;
+        writes[0].pImageInfo = &atlasImageInfo;
+
+        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet = sceneDescSets[i];
+        writes[1].dstBinding = 1;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[1].descriptorCount = 1;
+        writes[1].pImageInfo = &shadowImageInfo;
+
+        writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[2].dstSet = sceneDescSets[i];
+        writes[2].dstBinding = 2;
+        writes[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[2].descriptorCount = 1;
+        writes[2].pBufferInfo = &uboInfo;
+
+        vkUpdateDescriptorSets(context.getDevice(), 3, writes, 0, nullptr);
+    }
+
+    // 3D Directional CSM Shadow Pipeline (Depth only, No color attachments, Double-sided for foliage shadow cutout)
+    Pipeline csmPipeline(context, {}, shadowMap.getFormat(),
+                         exeDir + "assets/shaders/csm_depth.vert.spv",
+                         exeDir + "assets/shaders/csm_depth.frag.spv",
+                         descLayout, true, true, BlendMode::None,
+                         VK_CULL_MODE_NONE, true, 1.25f, 1.75f);
+
     // 3D Opaque World Pipeline (Back-face culling, Depth test & write ON, Alpha Blending OFF)
     Pipeline worldPipeline(context, swapchain.getImageFormat(), swapchain.getDepthFormat(),
                            exeDir + "assets/shaders/cell.vert.spv", exeDir + "assets/shaders/cell.frag.spv",
-                           descLayout, true, true, BlendMode::None, VK_CULL_MODE_BACK_BIT);
+                           sceneDescLayout, true, true, BlendMode::None, VK_CULL_MODE_BACK_BIT);
 
     // 3D Translucent Water Pipeline (Double-sided, Depth test ON, Depth write OFF, Alpha Blending ON)
     Pipeline waterPipeline(context, swapchain.getImageFormat(), swapchain.getDepthFormat(),
                            exeDir + "assets/shaders/cell.vert.spv", exeDir + "assets/shaders/water.frag.spv",
-                           descLayout, true, false, BlendMode::Alpha, VK_CULL_MODE_NONE);
+                           sceneDescLayout, true, false, BlendMode::Alpha, VK_CULL_MODE_NONE);
 
-    // 3D Volumetric Cloud Pipeline (Back-face culling ON, Depth test ON, Depth write OFF, Alpha Blending ON)
+    // 3D Volumetric Cloud Pipeline (Sky dome, Depth test ON, Depth write OFF, Alpha Blending ON)
     Pipeline cloudPipeline(context, swapchain.getImageFormat(), swapchain.getDepthFormat(),
-                           exeDir + "assets/shaders/cell.vert.spv", exeDir + "assets/shaders/cloud.frag.spv",
-                           descLayout, true, false, BlendMode::Alpha, VK_CULL_MODE_BACK_BIT);
+                           exeDir + "assets/shaders/cloud.vert.spv", exeDir + "assets/shaders/cloud.frag.spv",
+                           descLayout, true, false, BlendMode::Alpha, VK_CULL_MODE_NONE);
 
     // 3D Invert Pipeline for Block Wireframe (Depth test ON, Depth write OFF, BlendMode::Invert)
     Pipeline outlineInvertPipeline(context, swapchain.getImageFormat(), swapchain.getDepthFormat(),
                                    exeDir + "assets/shaders/cell.vert.spv", exeDir + "assets/shaders/cell.frag.spv",
-                                   descLayout, true, false, BlendMode::Invert, VK_CULL_MODE_NONE);
+                                   sceneDescLayout, true, false, BlendMode::Invert, VK_CULL_MODE_NONE);
 
     // 2D UI Pipeline (Targeting Swapchain sRGB image directly, Depth test/write OFF)
     Pipeline uiPipeline(context, swapchain.getImageFormat(), swapchain.getDepthFormat(),
@@ -158,7 +282,7 @@ void run() {
 
     // 2D Invert Pipeline for Crosshair (No culling, Depth test & write OFF, BlendMode::Invert)
     Pipeline invertPipeline(context, swapchain.getImageFormat(), swapchain.getDepthFormat(),
-                            exeDir + "assets/shaders/cell.vert.spv", exeDir + "assets/shaders/cell.frag.spv",
+                            exeDir + "assets/shaders/ui.vert.spv", exeDir + "assets/shaders/ui.frag.spv",
                             descLayout, false, false, BlendMode::Invert, VK_CULL_MODE_NONE);
     
     std::cout << "[Main] Pipelines created, creating World..." << std::endl;
@@ -253,8 +377,8 @@ void run() {
         uint32_t uiH = static_cast<uint32_t>(static_cast<float>(screenH) / options.uiScale);
         glm::vec2 uiMousePos = mousePos / options.uiScale;
 
-        // Advance Day / Night Cycle (720s / 12 min full cycle)
-        timeOfDay += dt / 720.0f;
+        // Advance Day / Night Cycle (1200s / 20 min full cycle, exact Minecraft parity)
+        timeOfDay += dt / 1200.0f;
         if (timeOfDay > 1.0f) timeOfDay -= 1.0f;
 
         float celestialAngle = timeOfDay * glm::two_pi<float>();
@@ -677,6 +801,32 @@ void run() {
                     ConfigManager::save(options, exeDir + "options.txt");
                 }
             }
+        } else if (state == GameState::VideoSettings) {
+            if (Input::isKeyPressed(GLFW_KEY_ESCAPE)) {
+                state = GameState::Options;
+                AudioEngine::get().playSound(SoundEffect::Click);
+                ConfigManager::save(options, exeDir + "options.txt");
+            }
+            bool isDown = Input::isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT);
+            bool isPressed = Input::isMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT);
+            if (isDown) {
+                int action = menuRenderer.handleClick(state, player, uiMousePos, uiW, uiH, currentSeed, options, !isPressed);
+                if (action != 0) {
+                    if (action == 13 || action == 14) {
+                        static const int resList[4][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
+                        int targetW = resList[options.resIndex][0];
+                        int targetH = resList[options.resIndex][1];
+                        window.setWindowMode(options.windowMode, targetW, targetH, window.getRefreshRate());
+                        swapchain.recreate(window.getWidth(), window.getHeight());
+                    }
+                    if (swapchain.isVSyncEnabled() != options.vsync) {
+                        swapchain.setVSync(options.vsync, window.getWidth(), window.getHeight());
+                    }
+                    world->renderDistance = options.renderDistance;
+                    world->lodPreset = options.lodPreset;
+                    ConfigManager::save(options, exeDir + "options.txt");
+                }
+            }
         } else if (state == GameState::AudioSettings) {
             if (Input::isKeyPressed(GLFW_KEY_ESCAPE)) {
                 state = GameState::Options;
@@ -688,6 +838,21 @@ void run() {
             if (isDown) {
                 int action = menuRenderer.handleClick(state, player, uiMousePos, uiW, uiH, currentSeed, options, !isPressed);
                 if (action == 6 || action == 9) {
+                    ConfigManager::save(options, exeDir + "options.txt");
+                }
+            }
+        } else if (state == GameState::ControlsSettings) {
+            if (Input::isKeyPressed(GLFW_KEY_ESCAPE)) {
+                state = GameState::Options;
+                AudioEngine::get().playSound(SoundEffect::Click);
+                ConfigManager::save(options, exeDir + "options.txt");
+            }
+            bool isDown = Input::isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT);
+            bool isPressed = Input::isMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT);
+            if (isDown) {
+                int action = menuRenderer.handleClick(state, player, uiMousePos, uiW, uiH, currentSeed, options, !isPressed);
+                if (action == 6 || action == 8) {
+                    player.mouseSensitivity = options.mouseSens;
                     ConfigManager::save(options, exeDir + "options.txt");
                 }
             }
@@ -806,16 +971,17 @@ void run() {
             pc.pointLight1[0] = 0.0f; pc.pointLight1[1] = 0.0f; pc.pointLight1[2] = 0.0f; pc.pointLight1[3] = 0.0f;
         }
 
-        // Point Light 2: Nearest placed world torch
-        auto placedTorch = world->getNearestPlacedTorch(pPos, 12.0f);
-        if (placedTorch.has_value()) {
-            pc.pointLight2[0] = placedTorch->x;
-            pc.pointLight2[1] = placedTorch->y;
-            pc.pointLight2[2] = placedTorch->z;
-            pc.pointLight2[3] = 1.0f;
-        } else {
-            pc.pointLight2[0] = 0.0f; pc.pointLight2[1] = 0.0f; pc.pointLight2[2] = 0.0f; pc.pointLight2[3] = 0.0f;
-        }
+        // Shader & Graphics Pack Options packed into pc.pointLight2
+        pc.pointLight2[0] = static_cast<float>(options.shadowQuality);
+        pc.pointLight2[1] = static_cast<float>(options.waterQuality);
+        pc.pointLight2[2] = static_cast<float>(options.colorGrading);
+        int settingsFlags = (options.playerShadow ? 1 : 0)
+                          | ((options.clouds ? 1 : 0) << 1)
+                          | ((options.cloudShadows ? 1 : 0) << 2)
+                          | ((options.smoothLighting ? 1 : 0) << 3)
+                          | ((options.torchColorBleed ? 1 : 0) << 4)
+                          | ((options.atmosphericFog & 3) << 5);
+        pc.pointLight2[3] = static_cast<float>(settingsFlags);
 
         // Point Light 3: Exact Handheld Torch in player's right hand
         if (hasHeldTorch) {
@@ -833,6 +999,128 @@ void run() {
             pc.heldTorch[3] = 1.0f;
         } else {
             pc.heldTorch[0] = 0.0f; pc.heldTorch[1] = 0.0f; pc.heldTorch[2] = 0.0f; pc.heldTorch[3] = 0.0f;
+        }
+
+        // =============================================================
+        // Cascaded Shadow Map Depth Pre-Pass & Shadow UBO Upload
+        // =============================================================
+        bool render3D = (state == GameState::Playing || state == GameState::Paused ||
+                         state == GameState::Inventory || state == GameState::CraftingTable ||
+                         state == GameState::Death);
+
+        uint32_t currentFrame = commandQueue.getCurrentFrame();
+        VkDescriptorSet currentSceneDescSet = sceneDescSets[currentFrame];
+        playerModelRenderer.resetFrame();
+
+        float normPlayerSky = 1.0f;
+        float normPlayerTorch = 0.0f;
+
+        if (render3D) {
+            // Update Cascades based on camera and sun/moon direction
+            shadowMap.updateCascades(player.getCamera().getViewMatrix(),
+                                     glm::radians(player.getCamera().fov),
+                                     aspect,
+                                     0.1f,
+                                     500.0f,
+                                     sunDir,
+                                     options.shadowDistance);
+
+            ShadowUBO shadowUBOData{};
+            const auto& shadowMats = shadowMap.getCascadeShadowMatrices();
+            shadowUBOData.lightViewProj[0] = shadowMats[0];
+            shadowUBOData.lightViewProj[1] = shadowMats[1];
+            const auto& splits = shadowMap.getCascadeSplits();
+            shadowUBOData.cascadeSplits = glm::vec4(splits[0], splits[1], 0.0f, 0.0f);
+            shadowUboBuffers[currentFrame].upload(&shadowUBOData, sizeof(ShadowUBO));
+
+            // Query Steve's ambient skylight and torchlight at player position
+            int playerSky = 15, playerBlock = 0;
+            int ppx = static_cast<int>(std::floor(pPos.x));
+            int ppy = static_cast<int>(std::floor(pPos.y));
+            int ppz = static_cast<int>(std::floor(pPos.z));
+            world->getLightLevels(ppx, ppy, ppz, 0, playerSky, playerBlock);
+            normPlayerSky = static_cast<float>(playerSky) / 15.0f;
+            normPlayerTorch = static_cast<float>(playerBlock) / 15.0f;
+
+            // Pre-build Steve's mesh so both shadow depth pass and 3D forward pass use identical vertices
+            playerModelRenderer.buildModelMesh(player, normPlayerSky, normPlayerTorch);
+
+            if (options.shadowQuality > 0) {
+                for (uint32_t cIdx = 0; cIdx < ShadowMap::CASCADE_COUNT; ++cIdx) {
+                    shadowMap.transitionForRendering(cmd, cIdx);
+
+                    VkRenderingAttachmentInfo shadowDepthAtt{};
+                    shadowDepthAtt.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+                    shadowDepthAtt.imageView = shadowMap.getLayerImageView(cIdx);
+                    shadowDepthAtt.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+                    shadowDepthAtt.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                    shadowDepthAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                    shadowDepthAtt.clearValue.depthStencil = { 1.0f, 0 };
+
+                    VkRenderingInfo shadowRenderInfo{};
+                    shadowRenderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+                    shadowRenderInfo.renderArea = { { 0, 0 }, { ShadowMap::RESOLUTION, ShadowMap::RESOLUTION } };
+                    shadowRenderInfo.layerCount = 1;
+                    shadowRenderInfo.colorAttachmentCount = 0;
+                    shadowRenderInfo.pColorAttachments = nullptr;
+                    shadowRenderInfo.pDepthAttachment = &shadowDepthAtt;
+
+                    vkCmdBeginRendering(cmd, &shadowRenderInfo);
+
+                    VkViewport shadowViewport{};
+                    shadowViewport.x = 0.0f;
+                    shadowViewport.y = static_cast<float>(ShadowMap::RESOLUTION);
+                    shadowViewport.width = static_cast<float>(ShadowMap::RESOLUTION);
+                    shadowViewport.height = -static_cast<float>(ShadowMap::RESOLUTION);
+                    shadowViewport.minDepth = 0.0f;
+                    shadowViewport.maxDepth = 1.0f;
+                    vkCmdSetViewport(cmd, 0, 1, &shadowViewport);
+
+                    VkRect2D shadowScissor{ { 0, 0 }, { ShadowMap::RESOLUTION, ShadowMap::RESOLUTION } };
+                    vkCmdSetScissor(cmd, 0, 1, &shadowScissor);
+
+                    csmPipeline.bind(cmd);
+                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                            csmPipeline.getLayout(), 0, 1,
+                                            &descSet, 0, nullptr);
+
+                    const glm::mat4& lightVP = shadowMap.getCascadeViewProjections()[cIdx];
+
+                    // Render Steve's 3D model into shadow map
+                    if (options.playerShadow) {
+                        playerModelRenderer.renderShadow(cmd, csmPipeline, lightVP);
+                    }
+
+                    // Render nearby terrain chunks into shadow map
+                    float maxChunkDist = (cIdx == 0) ? (splits[0] + 24.0f) : (splits[1] + 32.0f);
+                    float maxChunkDistSq = maxChunkDist * maxChunkDist;
+
+                    for (const auto& [coord, chunk] : world->getMeshes()) {
+                        if (chunk.opaqueIndexCount == 0 || !chunk.opaqueVertexBuffer.isValid()) continue;
+
+                        float chunkCenterX = static_cast<float>(coord.cx * CHUNK_SIZE_X + CHUNK_SIZE_X / 2);
+                        float chunkCenterZ = static_cast<float>(coord.cz * CHUNK_SIZE_Z + CHUNK_SIZE_Z / 2);
+                        float cdx = chunkCenterX - pPos.x;
+                        float cdz = chunkCenterZ - pPos.z;
+                        if (cdx * cdx + cdz * cdz > maxChunkDistSq) continue;
+
+                        vkCmdPushConstants(cmd, csmPipeline.getLayout(),
+                            VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                            0, sizeof(float) * 16, &lightVP[0][0]);
+
+                        VkBuffer vbs[] = { chunk.opaqueVertexBuffer.getBuffer() };
+                        VkDeviceSize offsets[] = { 0 };
+                        vkCmdBindVertexBuffers(cmd, 0, 1, vbs, offsets);
+                        vkCmdBindIndexBuffer(cmd, chunk.opaqueIndexBuffer.getBuffer(), 0, VK_INDEX_TYPE_UINT32);
+                        vkCmdDrawIndexed(cmd, chunk.opaqueIndexCount, 1, 0, 0, 0);
+                    }
+
+                    vkCmdEndRendering(cmd);
+                }
+
+                // Transition shadow map array to shader read-only for forward lighting pass
+                shadowMap.transitionForSampling(cmd);
+            }
         }
 
         // =============================================================
@@ -879,17 +1167,12 @@ void run() {
         VkRect2D scissor{{ 0, 0 }, swapchain.getExtent()};
         vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-        // Only render 3D scene when Playing or in game menus (Pause, Inventory, CraftingTable, Death)
-        bool render3D = (state == GameState::Playing || state == GameState::Paused ||
-                         state == GameState::Inventory || state == GameState::CraftingTable ||
-                         state == GameState::Death);
-
         if (render3D) {
-            // Bind World Pipeline & Atlas Descriptor Set
+            // Bind World Pipeline & Scene Descriptor Set (Atlas + Cascaded Shadows + Shadow UBO)
             worldPipeline.bind(cmd);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                                     worldPipeline.getLayout(), 0, 1,
-                                    &descSet, 0, nullptr);
+                                    &currentSceneDescSet, 0, nullptr);
 
             // 1. Render Triangular Sun & Moon
             celestialRenderer.render(cmd, worldPipeline, camPos, sunDir, vp);
@@ -932,24 +1215,24 @@ void run() {
             // Render Targeted Prism Outline with Mathematical Color Inversion
             if (state == GameState::Playing && targetHit.has_value()) {
                 outlineInvertPipeline.bind(cmd);
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, outlineInvertPipeline.getLayout(), 0, 1, &descSet, 0, nullptr);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, outlineInvertPipeline.getLayout(), 0, 1, &currentSceneDescSet, 0, nullptr);
                 outlineRenderer.render(cmd, outlineInvertPipeline, targetHit->hitCell, vp);
                 worldPipeline.bind(cmd);
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, worldPipeline.getLayout(), 0, 1, &descSet, 0, nullptr);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, worldPipeline.getLayout(), 0, 1, &currentSceneDescSet, 0, nullptr);
             }
 
             // Render First-Person Hand or Third-Person Triangular Player Character Model
             if (state == GameState::Playing || state == GameState::Paused || state == GameState::Inventory || state == GameState::CraftingTable) {
                 if (player.getCamera().getMode() == CameraMode::FirstPerson) {
-                    handRenderer.render(cmd, worldPipeline, player, aspect);
+                    handRenderer.render(cmd, worldPipeline, player, view, proj, pc, normPlayerSky, normPlayerTorch);
                 } else {
-                    playerModelRenderer.render(cmd, worldPipeline, player, vp, pc);
+                    playerModelRenderer.render(cmd, worldPipeline, player, vp, pc, normPlayerSky, normPlayerTorch);
                 }
             }
 
             // 3. Render Translucent Water Chunks
             waterPipeline.bind(cmd);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline.getLayout(), 0, 1, &descSet, 0, nullptr);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline.getLayout(), 0, 1, &currentSceneDescSet, 0, nullptr);
 
             for (const auto& [coord, chunk] : world->getMeshes()) {
                 if (chunk.waterIndexCount == 0 || !chunk.waterVertexBuffer.isValid()) continue;
@@ -1008,6 +1291,8 @@ void run() {
     }
 
     context.waitIdle();
+    vkDestroyDescriptorPool(context.getDevice(), sceneDescPool, nullptr);
+    vkDestroyDescriptorSetLayout(context.getDevice(), sceneDescLayout, nullptr);
     AudioEngine::get().shutdown();
 }
 

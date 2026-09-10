@@ -22,6 +22,14 @@ struct GameOptions {
     bool clouds = true;
     bool cloudShadows = true;
     bool vibrantVisuals = true;    // Bedrock RTX-Style Vibrant Visuals Shaders
+    int shadowQuality = 2;         // 0: Off, 1: Low, 2: Medium, 3: High
+    int shadowDistance = 1;        // 0: Near (48m), 1: Medium (80m), 2: Far (120m), 3: Ultra (160m)
+    bool playerShadow = true;      // Steve's shadow on ground
+    int waterQuality = 2;          // 0: Fast, 1: Fancy, 2: RTX
+    int colorGrading = 1;          // 0: Off, 1: Cinematic, 2: Vibrant, 3: Warm, 4: Cool
+    int atmosphericFog = 1;        // 0: Off, 1: Subtle, 2: Dense
+    bool torchColorBleed = true;   // Colored torchlight falloff & tinting
+    bool smoothLighting = true;    // Smooth vertex AO lighting
     bool lightOverlay = false;     // F7 toggle
     bool debugHUD = false;         // F3 toggle
 };

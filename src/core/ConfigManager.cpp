@@ -51,6 +51,14 @@ bool ConfigManager::load(GameOptions& options, const std::string& filePath) {
             else if (key == "clouds") options.clouds = (val == "1" || val == "true" || val == "True");
             else if (key == "cloudShadows") options.cloudShadows = (val == "1" || val == "true" || val == "True");
             else if (key == "vibrantVisuals") options.vibrantVisuals = (val == "1" || val == "true" || val == "True");
+            else if (key == "shadowQuality") options.shadowQuality = std::clamp(std::stoi(val), 0, 3);
+            else if (key == "shadowDistance") options.shadowDistance = std::clamp(std::stoi(val), 0, 3);
+            else if (key == "playerShadow") options.playerShadow = (val == "1" || val == "true" || val == "True");
+            else if (key == "waterQuality") options.waterQuality = std::clamp(std::stoi(val), 0, 2);
+            else if (key == "colorGrading") options.colorGrading = std::clamp(std::stoi(val), 0, 4);
+            else if (key == "atmosphericFog") options.atmosphericFog = std::clamp(std::stoi(val), 0, 2);
+            else if (key == "torchColorBleed") options.torchColorBleed = (val == "1" || val == "true" || val == "True");
+            else if (key == "smoothLighting") options.smoothLighting = (val == "1" || val == "true" || val == "True");
             else if (key == "lightOverlay") options.lightOverlay = (val == "1" || val == "true" || val == "True");
             else if (key == "debugHUD") options.debugHUD = (val == "1" || val == "true" || val == "True");
         } catch (...) {
@@ -90,6 +98,14 @@ bool ConfigManager::save(const GameOptions& options, const std::string& filePath
     file << "clouds=" << (options.clouds ? 1 : 0) << "\n";
     file << "cloudShadows=" << (options.cloudShadows ? 1 : 0) << "\n";
     file << "vibrantVisuals=" << (options.vibrantVisuals ? 1 : 0) << "\n";
+    file << "shadowQuality=" << options.shadowQuality << "\n";
+    file << "shadowDistance=" << options.shadowDistance << "\n";
+    file << "playerShadow=" << (options.playerShadow ? 1 : 0) << "\n";
+    file << "waterQuality=" << options.waterQuality << "\n";
+    file << "colorGrading=" << options.colorGrading << "\n";
+    file << "atmosphericFog=" << options.atmosphericFog << "\n";
+    file << "torchColorBleed=" << (options.torchColorBleed ? 1 : 0) << "\n";
+    file << "smoothLighting=" << (options.smoothLighting ? 1 : 0) << "\n";
     file << "lightOverlay=" << (options.lightOverlay ? 1 : 0) << "\n";
     file << "debugHUD=" << (options.debugHUD ? 1 : 0) << "\n";
 

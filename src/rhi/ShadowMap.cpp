@@ -106,16 +106,30 @@ void ShadowMap::cleanup() {
 }
 
 void ShadowMap::updateCascades(const glm::mat4& viewMatrix, float fovRadians, float aspect,
-                              float cameraNear, float cameraFar, const glm::vec3& lightDir) {
-    // 3 Practical cascades:
-    // Cascade 0: [cameraNear .. 16m] - Ultra-crisp player, hand, contact shadows
-    // Cascade 1: [16m .. 54m]        - Mid-range terrain, trees
-    // Cascade 2: [54m .. 200m]       - Distant hills, horizon geometry
-    m_cascadeSplits[0] = 16.0f;
-    m_cascadeSplits[1] = 54.0f;
-    m_cascadeSplits[2] = std::min(cameraFar, 200.0f);
+                              float cameraNear, float cameraFar, const glm::vec3& lightDir,
+                              int shadowDistanceOption) {
+    if (shadowDistanceOption == 0) {
+        m_cascadeSplits[0] = 18.0f;
+        m_cascadeSplits[1] = std::min(cameraFar, 48.0f);
+    } else if (shadowDistanceOption == 1) {
+        m_cascadeSplits[0] = 24.0f;
+        m_cascadeSplits[1] = std::min(cameraFar, 80.0f);
+    } else if (shadowDistanceOption == 2) {
+        m_cascadeSplits[0] = 32.0f;
+        m_cascadeSplits[1] = std::min(cameraFar, 120.0f);
+    } else {
+        m_cascadeSplits[0] = 40.0f;
+        m_cascadeSplits[1] = std::min(cameraFar, 160.0f);
+    }
 
     glm::vec3 normalizedLightDir = glm::normalize(lightDir);
+
+    const glm::mat4 biasMat(
+        0.5f,  0.0f, 0.0f, 0.0f,
+        0.0f, -0.5f, 0.0f, 0.0f,
+        0.0f,  0.0f, 1.0f, 0.0f,
+        0.5f,  0.5f, 0.0f, 1.0f
+    );
 
     for (uint32_t i = 0; i < CASCADE_COUNT; ++i) {
         float splitNear = (i == 0) ? cameraNear : m_cascadeSplits[i - 1];
@@ -173,6 +187,7 @@ void ShadowMap::updateCascades(const glm::mat4& viewMatrix, float fovRadians, fl
         glm::mat4 lightProj = glm::ortho(-radius, radius, -radius, radius, 0.0f, radius * 4.0f);
 
         m_cascadeViewProjs[i] = lightProj * lightView;
+        m_cascadeShadowMatrices[i] = biasMat * m_cascadeViewProjs[i];
     }
 }
 

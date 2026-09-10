@@ -104,6 +104,12 @@ void Window::setWindowMode(int mode, int width, int height, int refreshRate) {
         m_width = width;
         m_height = height;
     }
+    int fbW = 0, fbH = 0;
+    glfwGetFramebufferSize(m_window, &fbW, &fbH);
+    if (fbW > 0 && fbH > 0) {
+        m_width = fbW;
+        m_height = fbH;
+    }
     m_framebufferResized = true;
 }
 
