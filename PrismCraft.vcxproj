@@ -86,29 +86,7 @@
     </Link>
     <!-- Pre-Build: Compile shaders -->
     <PreBuildEvent>
-      <Command>if not exist "$(OutDir)assets\shaders" mkdir "$(OutDir)assets\shaders"
-if not exist "$(OutDir)assets\textures" mkdir "$(OutDir)assets\textures"
-if not exist "$(OutDir)assets\sounds" mkdir "$(OutDir)assets\sounds"
-if not exist "$(OutDir)assets\music" mkdir "$(OutDir)assets\music"
-copy /Y "$(ProjectDir)assets\textures\*" "$(OutDir)assets\textures\" >nul 2>nul
-copy /Y "$(ProjectDir)assets\sounds\*" "$(OutDir)assets\sounds\" >nul 2>nul
-copy /Y "$(ProjectDir)assets\music\*" "$(OutDir)assets\music\" >nul 2>nul
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\cell.vert" -o "$(OutDir)assets\shaders\cell.vert.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\cell.frag" -o "$(OutDir)assets\shaders\cell.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\cloud.vert" -o "$(OutDir)assets\shaders\cloud.vert.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\cloud.frag" -o "$(OutDir)assets\shaders\cloud.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\water.frag" -o "$(OutDir)assets\shaders\water.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\ui.vert" -o "$(OutDir)assets\shaders\ui.vert.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\ui.frag" -o "$(OutDir)assets\shaders\ui.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\csm_depth.vert" -o "$(OutDir)assets\shaders\csm_depth.vert.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\csm_depth.frag" -o "$(OutDir)assets\shaders\csm_depth.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\gbuffer.vert" -o "$(OutDir)assets\shaders\gbuffer.vert.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\gbuffer.frag" -o "$(OutDir)assets\shaders\gbuffer.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\fullscreen.vert" -o "$(OutDir)assets\shaders\fullscreen.vert.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\deferred_lighting.frag" -o "$(OutDir)assets\shaders\deferred_lighting.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\post_process.frag" -o "$(OutDir)assets\shaders\post_process.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\volumetric_fog.comp" -o "$(OutDir)assets\shaders\volumetric_fog.comp.spv"
-copy /Y "$(OutDir)assets\shaders\*.spv" "$(ProjectDir)assets\shaders\" >nul 2>nul</Command>
+      <Command>call "$(ProjectDir)compile_shaders.bat"</Command>
       <Message>Compiling GLSL shaders to SPIR-V and syncing assets...</Message>
     </PreBuildEvent>
   </ItemDefinitionGroup>
@@ -138,29 +116,7 @@ copy /Y "$(OutDir)assets\shaders\*.spv" "$(ProjectDir)assets\shaders\" >nul 2>nu
     </Link>
     <!-- Pre-Build: Compile shaders -->
     <PreBuildEvent>
-      <Command>if not exist "$(OutDir)assets\shaders" mkdir "$(OutDir)assets\shaders"
-if not exist "$(OutDir)assets\textures" mkdir "$(OutDir)assets\textures"
-if not exist "$(OutDir)assets\sounds" mkdir "$(OutDir)assets\sounds"
-if not exist "$(OutDir)assets\music" mkdir "$(OutDir)assets\music"
-copy /Y "$(ProjectDir)assets\textures\*" "$(OutDir)assets\textures\" >nul 2>nul
-copy /Y "$(ProjectDir)assets\sounds\*" "$(OutDir)assets\sounds\" >nul 2>nul
-copy /Y "$(ProjectDir)assets\music\*" "$(OutDir)assets\music\" >nul 2>nul
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\cell.vert" -o "$(OutDir)assets\shaders\cell.vert.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\cell.frag" -o "$(OutDir)assets\shaders\cell.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\cloud.vert" -o "$(OutDir)assets\shaders\cloud.vert.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\cloud.frag" -o "$(OutDir)assets\shaders\cloud.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\water.frag" -o "$(OutDir)assets\shaders\water.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\ui.vert" -o "$(OutDir)assets\shaders\ui.vert.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\ui.frag" -o "$(OutDir)assets\shaders\ui.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\csm_depth.vert" -o "$(OutDir)assets\shaders\csm_depth.vert.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\csm_depth.frag" -o "$(OutDir)assets\shaders\csm_depth.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\gbuffer.vert" -o "$(OutDir)assets\shaders\gbuffer.vert.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\gbuffer.frag" -o "$(OutDir)assets\shaders\gbuffer.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\fullscreen.vert" -o "$(OutDir)assets\shaders\fullscreen.vert.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\deferred_lighting.frag" -o "$(OutDir)assets\shaders\deferred_lighting.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\post_process.frag" -o "$(OutDir)assets\shaders\post_process.frag.spv"
-"$(VULKAN_SDK)\Bin\glslc.exe" "$(ProjectDir)assets\shaders\volumetric_fog.comp" -o "$(OutDir)assets\shaders\volumetric_fog.comp.spv"
-copy /Y "$(OutDir)assets\shaders\*.spv" "$(ProjectDir)assets\shaders\" >nul 2>nul</Command>
+      <Command>call "$(ProjectDir)compile_shaders.bat"</Command>
       <Message>Compiling GLSL shaders to SPIR-V and syncing assets...</Message>
     </PreBuildEvent>
   </ItemDefinitionGroup>
@@ -202,6 +158,8 @@ copy /Y "$(OutDir)assets\shaders\*.spv" "$(ProjectDir)assets\shaders\" >nul 2>nu
     <ClCompile Include="src\game\Crafting.cpp" />
     <ClCompile Include="src\game\ArrowManager.cpp" />
     <ClCompile Include="src\renderer\CloudMapGenerator.cpp" />
+    <ClCompile Include="src\renderer\SkyRenderer.cpp" />
+    <ClCompile Include="src\renderer\PostProcessRenderer.cpp" />
   </ItemGroup>
 
   <!-- Header Files (.hpp) -->
@@ -250,6 +208,8 @@ copy /Y "$(OutDir)assets\shaders\*.spv" "$(ProjectDir)assets\shaders\" >nul 2>nu
     <ClInclude Include="src\game\Crafting.hpp" />
     <ClInclude Include="src\game\ArrowManager.hpp" />
     <ClInclude Include="src\renderer\CloudMapGenerator.hpp" />
+    <ClInclude Include="src\renderer\SkyRenderer.hpp" />
+    <ClInclude Include="src\renderer\PostProcessRenderer.hpp" />
   </ItemGroup>
 
   <!-- Shader Files -->
@@ -260,6 +220,8 @@ copy /Y "$(OutDir)assets\shaders\*.spv" "$(ProjectDir)assets\shaders\" >nul 2>nu
     <None Include="assets\shaders\water.frag" />
     <None Include="assets\shaders\ui.vert" />
     <None Include="assets\shaders\ui.frag" />
+    <None Include="assets\shaders\sky.vert" />
+    <None Include="assets\shaders\sky.frag" />
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

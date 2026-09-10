@@ -2,31 +2,27 @@
 #include "rhi/Buffer.hpp"
 #include "rhi/Pipeline.hpp"
 #include <glm/glm.hpp>
-#include <vector>
 
 namespace prismcraft {
 
 class VulkanContext;
 class CommandQueue;
 
-class CloudRenderer {
+class SkyRenderer {
 public:
-    CloudRenderer(VulkanContext& context, CommandQueue& cmdQueue);
+    SkyRenderer(VulkanContext& context, CommandQueue& cmdQueue);
 
     void render(VkCommandBuffer cmd,
-                const Pipeline& cloudPipeline,
+                const Pipeline& pipeline,
                 const glm::vec3& camPos,
-                float time,
-                const glm::mat4& vpMatrix,
-                const glm::vec3& skyColor,
                 const glm::vec3& sunDir,
+                const glm::mat4& vpMatrix,
                 float dayFactor,
                 float sunHeight,
-                bool vibrantVisuals,
                 float exposure = 0.95f);
 
 private:
-    void buildSkyDome();
+    void buildSkySphere();
 
     VulkanContext& m_context;
     CommandQueue& m_cmdQueue;

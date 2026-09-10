@@ -33,7 +33,8 @@ public:
 
 private:
     void buildCrosshairMesh();
-    void updateDynamicUI(const Player& player, uint32_t screenWidth, uint32_t screenHeight, float fps,
+    void updateDynamicUI(uint32_t frameIndex,
+                         const Player& player, uint32_t screenWidth, uint32_t screenHeight, float fps,
                          const GameOptions& options, const World* world,
                          bool isChatOpen, const std::string& chatInput,
                          const std::string& feedbackMsg, float feedbackTimer);
@@ -45,22 +46,12 @@ private:
     Buffer m_chIbo;
     uint32_t m_chIndexCount = 0;
 
+    static constexpr VkDeviceSize MAX_UI_VBO_SIZE = 1024 * 1024; // 1 MB
+    static constexpr VkDeviceSize MAX_UI_IBO_SIZE = 512 * 1024;  // 512 KB
+
     Buffer m_uiVertexBuffer[MAX_FRAMES_IN_FLIGHT];
     Buffer m_uiIndexBuffer[MAX_FRAMES_IN_FLIGHT];
     uint32_t m_uiIndexCount[MAX_FRAMES_IN_FLIGHT]{0, 0};
-
-    uint32_t m_lastWidth = 0;
-    uint32_t m_lastHeight = 0;
-    int m_lastSelectedSlot = -1;
-    float m_lastHealth = -1.0f;
-    float m_lastOxygen = -1.0f;
-    int m_lastFPS = -1;
-    bool m_lastDebugHUD = false;
-    glm::vec3 m_lastPos{9999.0f};
-    bool m_lastChatOpen = false;
-    std::string m_lastChatInput = "";
-    float m_lastFeedbackTimer = 0.0f;
-    int m_lastCamMode = -1;
 };
 
 } // namespace prismcraft

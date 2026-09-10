@@ -21,11 +21,13 @@
 #include "renderer/ItemDropRenderer.hpp"
 #include "renderer/BlockCrackRenderer.hpp"
 #include "renderer/CloudRenderer.hpp"
+#include "renderer/SkyRenderer.hpp"
 #include "renderer/CloudMapGenerator.hpp"
 #include "renderer/LightOverlayRenderer.hpp"
 #include "ui/UIRenderer.hpp"
 #include "ui/MenuRenderer.hpp"
 #include "renderer/PlayerModelRenderer.hpp"
+#include "renderer/PostProcessRenderer.hpp"
 #include "game/ArrowManager.hpp"
 
 #include <GLFW/glfw3.h>
@@ -49,6 +51,93 @@ static std::string getExeDir() {
     char path[MAX_PATH];
     GetModuleFileNameA(nullptr, path, MAX_PATH);
     return std::filesystem::path(path).parent_path().string() + "/";
+}
+
+static void checkAndAutoRecompileShaders(const std::string& exeDir) {
+    std::string glslc = "D:\\Softwares\\Vulkan SDK\\Bin\\glslc.exe";
+    const char* vksdk = getenv("VULKAN_SDK");
+    if (vksdk && std::filesystem::exists(std::string(vksdk) + "\\Bin\\glslc.exe")) {
+        glslc = std::string(vksdk) + "\\Bin\\glslc.exe";
+    } else if (!std::filesystem::exists(glslc)) {
+        glslc = "glslc.exe";
+    }
+
+    std::filesystem::path exeDirPath(exeDir);
+    if (exeDirPath.filename().empty()) {
+        exeDirPath = exeDirPath.parent_path();
+    }
+
+    std::vector<std::filesystem::path> candidates = {
+        std::filesystem::current_path() / "assets" / "shaders",
+        exeDirPath / "assets" / "shaders",
+        exeDirPath.parent_path() / "assets" / "shaders",
+        exeDirPath.parent_path().parent_path() / "assets" / "shaders",
+        exeDirPath.parent_path().parent_path().parent_path() / "assets" / "shaders"
+    };
+
+    std::filesystem::path projShaders;
+    for (const auto& c : candidates) {
+        if (std::filesystem::exists(c) && std::filesystem::exists(c / "cloud.frag")) {
+            projShaders = c;
+            break;
+        }
+    }
+
+    if (projShaders.empty() || !std::filesystem::exists(projShaders)) {
+        return;
+    }
+
+    std::filesystem::path exeShaders = std::filesystem::path(exeDir) / "assets" / "shaders";
+    if (!std::filesystem::exists(exeShaders)) {
+        try { std::filesystem::create_directories(exeShaders); } catch (...) {}
+    }
+
+    bool anyRecompiled = false;
+    for (const auto& entry : std::filesystem::directory_iterator(projShaders)) {
+        if (!entry.is_regular_file()) continue;
+        std::string ext = entry.path().extension().string();
+        if (ext == ".frag" || ext == ".vert" || ext == ".comp") {
+            std::filesystem::path srcFile = entry.path();
+            std::filesystem::path spvProj = srcFile.string() + ".spv";
+            std::filesystem::path spvExe = exeShaders / (srcFile.filename().string() + ".spv");
+
+            bool needsRecompile = false;
+            auto srcTime = std::filesystem::last_write_time(srcFile);
+
+            if (!std::filesystem::exists(spvProj) || srcTime > std::filesystem::last_write_time(spvProj)) {
+                needsRecompile = true;
+            }
+            if (!std::filesystem::exists(spvExe) || srcTime > std::filesystem::last_write_time(spvExe)) {
+                needsRecompile = true;
+            }
+
+            if (needsRecompile) {
+                // Windows cmd.exe /c strips outermost quotes when multiple quoted args exist;
+                // wrapping in an extra outer pair ensures "glslc with spaces" executes correctly.
+                std::string cmd = "\"\"" + glslc + "\" \"" + srcFile.string() + "\" -o \"" + spvProj.string() + "\"\"";
+                int ret = std::system(cmd.c_str());
+                if (ret == 0) {
+                    try {
+                        std::filesystem::copy_file(spvProj, spvExe, std::filesystem::copy_options::overwrite_existing);
+                    } catch (...) {}
+                    std::cout << "[ShaderAutoCompiler] Recompiled " << srcFile.filename().string() << " -> .spv successfully!" << std::endl;
+                    anyRecompiled = true;
+                } else {
+                    std::cerr << "[ShaderAutoCompiler] ERROR: glslc failed on " << srcFile.filename().string() << std::endl;
+                }
+            } else if (std::filesystem::exists(spvProj)) {
+                if (!std::filesystem::exists(spvExe) || std::filesystem::last_write_time(spvProj) > std::filesystem::last_write_time(spvExe)) {
+                    try {
+                        std::filesystem::copy_file(spvProj, spvExe, std::filesystem::copy_options::overwrite_existing);
+                        std::cout << "[ShaderAutoCompiler] Synced " << spvProj.filename().string() << " to exe directory." << std::endl;
+                    } catch (...) {}
+                }
+            }
+        }
+    }
+    if (anyRecompiled) {
+        std::cout << "[ShaderAutoCompiler] All modified shaders recompiled and updated live." << std::endl;
+    }
 }
 
 namespace prismcraft {
@@ -112,6 +201,7 @@ static float calculateBreakDuration(BlockType block, BlockType tool) {
 
 void run() {
     std::string exeDir = getExeDir();
+    checkAndAutoRecompileShaders(exeDir);
     GameOptions options;
     ConfigManager::load(options, exeDir + "options.txt");
 
@@ -134,10 +224,11 @@ void run() {
     VulkanContext context(window.getHandle());
     Swapchain swapchain(context, window.getWidth(), window.getHeight(), options.vsync);
     CommandQueue commandQueue(context);
+    PostProcessRenderer postProcessRenderer(context, window.getWidth(), window.getHeight(), swapchain.getImageFormat(), exeDir);
     
-    // Generate & Upload 256x256 Pixel-Art Texture Atlas
+    // Generate & Upload 256x512 Pixel-Art Texture Atlas with Crisp Nearest Filtering (zero blur, zero atlas bleed)
     std::vector<uint8_t> atlasPixels = TextureAtlas::generateAtlasPixels();
-    Texture textureAtlas(context, commandQueue, TextureAtlas::ATLAS_WIDTH, TextureAtlas::ATLAS_HEIGHT, atlasPixels.data());
+    Texture textureAtlas(context, commandQueue, TextureAtlas::ATLAS_WIDTH, TextureAtlas::ATLAS_HEIGHT, atlasPixels.data(), false, false, 0);
     VkDescriptorSetLayout descLayout = textureAtlas.getDescriptorSetLayout();
     VkDescriptorSet descSet = textureAtlas.getDescriptorSet();
 
@@ -270,22 +361,27 @@ void run() {
                          VK_CULL_MODE_NONE, true, 1.25f, 1.75f);
 
     // 3D Opaque World Pipeline (Back-face culling, Depth test & write ON, Alpha Blending OFF)
-    Pipeline worldPipeline(context, swapchain.getImageFormat(), swapchain.getDepthFormat(),
+    Pipeline worldPipeline(context, postProcessRenderer.getHDRFormat(), swapchain.getDepthFormat(),
                            exeDir + "assets/shaders/cell.vert.spv", exeDir + "assets/shaders/cell.frag.spv",
                            sceneDescLayout, true, true, BlendMode::None, VK_CULL_MODE_BACK_BIT);
 
     // 3D Translucent Water Pipeline (Double-sided, Depth test ON, Depth write OFF, Alpha Blending ON)
-    Pipeline waterPipeline(context, swapchain.getImageFormat(), swapchain.getDepthFormat(),
+    Pipeline waterPipeline(context, postProcessRenderer.getHDRFormat(), swapchain.getDepthFormat(),
                            exeDir + "assets/shaders/cell.vert.spv", exeDir + "assets/shaders/water.frag.spv",
                            sceneDescLayout, true, false, BlendMode::Alpha, VK_CULL_MODE_NONE);
 
     // 3D Volumetric Cloud Pipeline (Sky dome, Depth test ON, Depth write OFF, Alpha Blending ON)
-    Pipeline cloudPipeline(context, swapchain.getImageFormat(), swapchain.getDepthFormat(),
+    Pipeline cloudPipeline(context, postProcessRenderer.getHDRFormat(), swapchain.getDepthFormat(),
                            exeDir + "assets/shaders/cloud.vert.spv", exeDir + "assets/shaders/cloud.frag.spv",
                            descLayout, true, false, BlendMode::Alpha, VK_CULL_MODE_NONE);
 
+    // 3D Procedural Atmospheric Sky Pipeline (Sky sphere, Depth test ON, Depth write OFF, Blend None, Cull None)
+    Pipeline skyPipeline(context, postProcessRenderer.getHDRFormat(), swapchain.getDepthFormat(),
+                         exeDir + "assets/shaders/sky.vert.spv", exeDir + "assets/shaders/sky.frag.spv",
+                         descLayout, true, false, BlendMode::None, VK_CULL_MODE_NONE);
+
     // 3D Invert Pipeline for Block Wireframe (Depth test ON, Depth write OFF, BlendMode::Invert)
-    Pipeline outlineInvertPipeline(context, swapchain.getImageFormat(), swapchain.getDepthFormat(),
+    Pipeline outlineInvertPipeline(context, postProcessRenderer.getHDRFormat(), swapchain.getDepthFormat(),
                                    exeDir + "assets/shaders/cell.vert.spv", exeDir + "assets/shaders/cell.frag.spv",
                                    sceneDescLayout, true, false, BlendMode::Invert, VK_CULL_MODE_NONE);
 
@@ -328,6 +424,7 @@ void run() {
     FallingBlockManager fallingBlockManager(context, commandQueue);
     ArrowManager arrowManager(context, commandQueue);
     CloudRenderer cloudRenderer(context, commandQueue);
+    SkyRenderer skyRenderer(context, commandQueue);
     LightOverlayRenderer lightOverlayRenderer(context, commandQueue);
     
     std::cout << "[Main] All renderers initialized, entering main game loop!" << std::endl;
@@ -385,6 +482,12 @@ void run() {
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
             continue;
         }
+
+        if (window.wasResized()) {
+            window.resetResizedFlag();
+            swapchain.recreate(screenW, screenH);
+            postProcessRenderer.recreate(screenW, screenH);
+        }
         
         glm::vec2 mousePos = Input::getMousePosition();
         uint32_t uiW = static_cast<uint32_t>(static_cast<float>(screenW) / options.uiScale);
@@ -402,10 +505,10 @@ void run() {
         float sunHeight = sunDir.y;
         float sunIntensity = std::clamp((sunHeight + 0.15f) / 0.65f, 0.0f, 1.0f);
 
-        // Dynamic atmospheric sky color
-        glm::vec3 daySky(0.40f, 0.65f, 0.94f);      // Crisp Minecraft sky blue
-        glm::vec3 duskSky(0.92f, 0.44f, 0.18f);     // Vibrant warm sunset
-        glm::vec3 nightSky(0.012f, 0.016f, 0.035f); // Deep dark night sky
+        // Dynamic atmospheric horizon sky color (calibrated to the linear horizon in sky.frag)
+        glm::vec3 daySky(0.78f, 0.86f, 0.94f);      // Soft luminous atmospheric horizon sky blue
+        glm::vec3 duskSky(0.98f, 0.74f, 0.50f);     // Warm golden-peach horizon
+        glm::vec3 nightSky(0.13f, 0.15f, 0.22f);    // Soft atmospheric indigo night horizon
 
         glm::vec3 skyColor;
         if (sunHeight > 0.1f) {
@@ -423,7 +526,8 @@ void run() {
         if (isUnderwater) {
             skyColor = glm::vec3(0.02f, 0.16f, 0.44f); // Deep oceanic blue matching Image 3
         }
-        float fogDistance = isUnderwater ? 24.0f : (static_cast<float>(world->renderDistance * 16) * 1.02f);
+        float maxVisibleDist = static_cast<float>(world->renderDistance * 16);
+        float fogDistance = isUnderwater ? 24.0f : (maxVisibleDist * 0.92f);
 
         // -------------------------------------------------------------
         // State-Specific Logic & Input Handling
@@ -802,12 +906,14 @@ void run() {
                     world->lodPreset = options.lodPreset;
                     if (swapchain.isVSyncEnabled() != options.vsync) {
                         swapchain.setVSync(options.vsync, window.getWidth(), window.getHeight());
+                        postProcessRenderer.recreate(window.getWidth(), window.getHeight());
                     }
                     if (action == 13 || action == 14) {
                         int targetW = resList[std::clamp(options.resIndex, 0, 3)][0];
                         int targetH = resList[std::clamp(options.resIndex, 0, 3)][1];
                         window.setWindowMode(options.windowMode, targetW, targetH, window.getRefreshRate());
                         swapchain.recreate(window.getWidth(), window.getHeight());
+                        postProcessRenderer.recreate(window.getWidth(), window.getHeight());
                     }
                     ConfigManager::save(options, exeDir + "options.txt");
                 } else if (action == 4) {
@@ -830,9 +936,11 @@ void run() {
                         int targetH = resList[std::clamp(options.resIndex, 0, 3)][1];
                         window.setWindowMode(options.windowMode, targetW, targetH, window.getRefreshRate());
                         swapchain.recreate(window.getWidth(), window.getHeight());
+                        postProcessRenderer.recreate(window.getWidth(), window.getHeight());
                     }
                     if (swapchain.isVSyncEnabled() != options.vsync) {
                         swapchain.setVSync(options.vsync, window.getWidth(), window.getHeight());
+                        postProcessRenderer.recreate(window.getWidth(), window.getHeight());
                     }
                     if (options.cloudSeed != currentCloudSeed) {
                         context.waitIdle();
@@ -922,6 +1030,7 @@ void run() {
         uint32_t imageIndex = commandQueue.beginFrame(swapchain);
         if (imageIndex == UINT32_MAX) {
             swapchain.recreate(window.getWidth(), window.getHeight());
+            postProcessRenderer.recreate(window.getWidth(), window.getHeight());
             continue;
         }
 
@@ -954,7 +1063,7 @@ void run() {
         float activeIntensity = sunIntensity;
         if (sunDir.y <= 0.0f) {
             activeLightDir = -sunDir; // Moon is on opposite celestial pole!
-            activeIntensity = 0.22f;   // Soft silver moonlight intensity for authentic dark nights
+            activeIntensity = 0.42f;   // Luminous silver moonlight intensity for authentic visible nights
         }
         float signedIntensity = options.vibrantVisuals ? activeIntensity : -activeIntensity;
         pc.sunDir[0] = activeLightDir.x; pc.sunDir[1] = activeLightDir.y; pc.sunDir[2] = activeLightDir.z; pc.sunDir[3] = signedIntensity;
@@ -978,30 +1087,50 @@ void run() {
         if (hasHeldTorch) packedVal = -packedVal - 1.0f;
         pc.lightColor[0] = pPos.x; pc.lightColor[1] = pPos.y; pc.lightColor[2] = pPos.z; pc.lightColor[3] = packedVal;
 
-        // Point Light 1: Nearest active dropped torch (flickering dynamic light & shadow caster)
-        auto droppedTorch = itemDropManager.getNearestTorchDrop(pPos, 22.0f);
-        if (droppedTorch.has_value()) {
-            pc.pointLight1[0] = droppedTorch->first.x;
-            pc.pointLight1[1] = droppedTorch->first.y;
-            pc.pointLight1[2] = droppedTorch->first.z;
-            pc.pointLight1[3] = droppedTorch->second;
-        } else {
-            pc.pointLight1[0] = 0.0f; pc.pointLight1[1] = 0.0f; pc.pointLight1[2] = 0.0f; pc.pointLight1[3] = 0.0f;
+        // Gather dynamic light sources (placed torches in world & dropped torch items)
+        struct DynamicLightCandidate {
+            glm::vec3 pos;
+            float intensity;
+            float distSq;
+        };
+        std::vector<DynamicLightCandidate> lightCandidates;
+
+        auto placedTorches = world->getNearestPlacedTorches(pPos, 4, 28.0f);
+        for (const auto& pt : placedTorches) {
+            float flicker = 0.95f + 0.05f * std::sin(timer.getElapsedTime() * 9.7f + pt.x * 3.1f + pt.z * 1.7f);
+            glm::vec3 diff = pPos - pt;
+            float dSq = glm::dot(diff, diff);
+            lightCandidates.push_back({pt, 1.0f * flicker, dSq});
         }
 
-        // Shader & Graphics Pack Options packed into pc.pointLight2
-        pc.pointLight2[0] = static_cast<float>(options.shadowQuality);
-        pc.pointLight2[1] = static_cast<float>(options.waterQuality);
-        pc.pointLight2[2] = static_cast<float>(options.colorGrading);
-        int settingsFlags = (options.playerShadow ? 1 : 0)
-                          | ((options.clouds ? 1 : 0) << 1)
-                          | ((options.cloudShadows ? 1 : 0) << 2)
-                          | ((options.smoothLighting ? 1 : 0) << 3)
-                          | ((options.torchColorBleed ? 1 : 0) << 4)
-                          | ((options.atmosphericFog & 3) << 5);
-        pc.pointLight2[3] = static_cast<float>(settingsFlags);
+        auto droppedTorch = itemDropManager.getNearestTorchDrop(pPos, 22.0f);
+        if (droppedTorch.has_value()) {
+            glm::vec3 diff = pPos - droppedTorch->first;
+            float dSq = glm::dot(diff, diff);
+            lightCandidates.push_back({droppedTorch->first, droppedTorch->second, dSq});
+        }
 
-        // Point Light 3: Exact Handheld Torch in player's right hand
+        std::sort(lightCandidates.begin(), lightCandidates.end(), [](const DynamicLightCandidate& a, const DynamicLightCandidate& b) {
+            return a.distSq < b.distSq;
+        });
+
+        auto assignPointLight = [&](float* dest, size_t index) {
+            if (index < lightCandidates.size()) {
+                dest[0] = lightCandidates[index].pos.x;
+                dest[1] = lightCandidates[index].pos.y;
+                dest[2] = lightCandidates[index].pos.z;
+                dest[3] = lightCandidates[index].intensity;
+            } else {
+                dest[0] = 0.0f; dest[1] = 0.0f; dest[2] = 0.0f; dest[3] = 0.0f;
+            }
+        };
+
+        assignPointLight(pc.pointLight1, 0);
+        assignPointLight(pc.pointLight2, 1);
+        assignPointLight(pc.pointLight3, 2);
+        assignPointLight(pc.pointLight4, 3);
+
+        // Exact Handheld Torch in player's right hand (with organic subtle flicker)
         if (hasHeldTorch) {
             glm::vec3 fwd = player.getCamera().getForward();
             glm::vec3 right = glm::normalize(glm::cross(fwd, glm::vec3(0.0f, 1.0f, 0.0f)));
@@ -1011,13 +1140,34 @@ void run() {
             } else {
                 torchWorldPos = pPos + glm::vec3(0.0f, 1.15f, 0.0f) + fwd * 0.38f + right * 0.34f;
             }
+            float torchFlicker = 0.95f + 0.05f * std::sin(timer.getElapsedTime() * 11.5f);
             pc.heldTorch[0] = torchWorldPos.x;
             pc.heldTorch[1] = torchWorldPos.y;
             pc.heldTorch[2] = torchWorldPos.z;
-            pc.heldTorch[3] = 1.0f;
+            pc.heldTorch[3] = 1.0f * torchFlicker;
         } else {
             pc.heldTorch[0] = 0.0f; pc.heldTorch[1] = 0.0f; pc.heldTorch[2] = 0.0f; pc.heldTorch[3] = 0.0f;
         }
+
+        // Shader & Graphics Pack Options packed into pc.shaderOptions
+        int effectiveShadowQ = options.vibrantVisuals ? options.shadowQuality : 0;
+        int effectiveWaterQ  = options.vibrantVisuals ? options.waterQuality : 0;
+        pc.shaderOptions[0] = static_cast<float>(effectiveShadowQ);
+        pc.shaderOptions[1] = static_cast<float>(effectiveWaterQ);
+        pc.shaderOptions[2] = options.smoothLighting ? options.aoStrength : 0.0f;
+        int settingsFlags = ((options.playerShadow && options.vibrantVisuals) ? 1 : 0)
+                          | ((options.clouds ? 1 : 0) << 1)
+                          | (((options.cloudShadows && options.vibrantVisuals) ? 1 : 0) << 2)
+                          | ((options.smoothLighting ? 1 : 0) << 3)
+                          | ((options.torchColorBleed ? 1 : 0) << 4)
+                          | (((options.vibrantVisuals ? options.atmosphericFog : 0) & 3) << 5);
+        pc.shaderOptions[3] = static_cast<float>(settingsFlags);
+
+        float dayFactor = std::clamp((sunHeight + 0.10f) / 0.35f, 0.0f, 1.0f);
+        pc.dayInfo[0] = dayFactor;
+        pc.dayInfo[1] = sunHeight;
+        pc.dayInfo[2] = options.exposure;
+        pc.dayInfo[3] = options.fogDensity;
 
         // =============================================================
         // Cascaded Shadow Map Depth Pre-Pass & Shadow UBO Upload
@@ -1034,13 +1184,13 @@ void run() {
         float normPlayerTorch = 0.0f;
 
         if (render3D) {
-            // Update Cascades based on camera and sun/moon direction
+            // Update Cascades based on camera and active light direction (sun during day, moon at night)
             shadowMap.updateCascades(player.getCamera().getViewMatrix(),
                                      glm::radians(player.getCamera().fov),
                                      aspect,
                                      0.1f,
                                      500.0f,
-                                     sunDir,
+                                     activeLightDir,
                                      options.shadowDistance);
 
             ShadowUBO shadowUBOData{};
@@ -1109,8 +1259,8 @@ void run() {
                         playerModelRenderer.renderShadow(cmd, csmPipeline, lightVP);
                     }
 
-                    // Render nearby terrain chunks into shadow map
-                    float maxChunkDist = (cIdx == 0) ? (splits[0] + 24.0f) : (splits[1] + 32.0f);
+                    // Render nearby terrain chunks into shadow map (with margin for casters towards the sun)
+                    float maxChunkDist = (cIdx == 0) ? (splits[0] + 36.0f) : (splits[1] + 48.0f);
                     float maxChunkDistSq = maxChunkDist * maxChunkDist;
 
                     for (const auto& [coord, chunk] : world->getMeshes()) {
@@ -1142,18 +1292,23 @@ void run() {
         }
 
         // =============================================================
-        // Unified Forward Dynamic Rendering Pass
+        // Pass 1: 3D Scene HDR Dynamic Rendering Pass
         // =============================================================
-        swapchain.transitionToColorAttachment(cmd, imageIndex);
+        postProcessRenderer.transitionHDRForRendering(cmd);
+        swapchain.transitionDepthAttachment(cmd);
 
-        // Clear swapchain color attachment with dynamic sky/fog color
-        VkRenderingAttachmentInfo colorAtt{};
-        colorAtt.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        colorAtt.imageView = swapchain.getImageView(imageIndex);
-        colorAtt.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        colorAtt.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        colorAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        colorAtt.clearValue.color = {{ skyColor.r, skyColor.g, skyColor.b, 1.0f }};
+        auto srgbToLinear = [](float c) {
+            return (c <= 0.04045f) ? (c / 12.92f) : std::pow((c + 0.055f) / 1.055f, 2.4f);
+        };
+        glm::vec3 linearSky(srgbToLinear(skyColor.r), srgbToLinear(skyColor.g), srgbToLinear(skyColor.b));
+
+        VkRenderingAttachmentInfo hdrColorAtt{};
+        hdrColorAtt.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        hdrColorAtt.imageView = postProcessRenderer.getHDRImageView();
+        hdrColorAtt.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        hdrColorAtt.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        hdrColorAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        hdrColorAtt.clearValue.color = {{ linearSky.r, linearSky.g, linearSky.b, 1.0f }};
 
         VkRenderingAttachmentInfo depthAtt{};
         depthAtt.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -1163,15 +1318,15 @@ void run() {
         depthAtt.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         depthAtt.clearValue.depthStencil = { 1.0f, 0 };
 
-        VkRenderingInfo renderInfo{};
-        renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-        renderInfo.renderArea = {{ 0, 0 }, swapchain.getExtent()};
-        renderInfo.layerCount = 1;
-        renderInfo.colorAttachmentCount = 1;
-        renderInfo.pColorAttachments = &colorAtt;
-        renderInfo.pDepthAttachment = &depthAtt;
+        VkRenderingInfo hdrRenderInfo{};
+        hdrRenderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+        hdrRenderInfo.renderArea = {{ 0, 0 }, swapchain.getExtent()};
+        hdrRenderInfo.layerCount = 1;
+        hdrRenderInfo.colorAttachmentCount = 1;
+        hdrRenderInfo.pColorAttachments = &hdrColorAtt;
+        hdrRenderInfo.pDepthAttachment = &depthAtt;
 
-        vkCmdBeginRendering(cmd, &renderInfo);
+        vkCmdBeginRendering(cmd, &hdrRenderInfo);
 
         VkViewport viewport{};
         viewport.x = 0.0f;
@@ -1186,6 +1341,9 @@ void run() {
         vkCmdSetScissor(cmd, 0, 1, &scissor);
 
         if (render3D) {
+            // 0. Render Procedural Atmospheric Sky Dome at Far Plane (Depth = 1.0)
+            skyRenderer.render(cmd, skyPipeline, camPos, sunDir, vp, dayFactor, sunHeight, options.exposure);
+
             // Bind World Pipeline & Scene Descriptor Set (Atlas + Cascaded Shadows + Shadow UBO)
             worldPipeline.bind(cmd);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -1271,11 +1429,53 @@ void run() {
             if (options.clouds && !isUnderwater) {
                 cloudPipeline.bind(cmd);
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cloudPipeline.getLayout(), 0, 1, &cloudDescSet, 0, nullptr);
-                cloudRenderer.render(cmd, cloudPipeline, camPos, timer.getElapsedTime(), vp, skyColor, sunDir);
+                cloudRenderer.render(cmd, cloudPipeline, camPos, timer.getElapsedTime(), vp, skyColor, sunDir, dayFactor, sunHeight, options.vibrantVisuals, options.exposure);
             }
         }
 
-        // 5. Render 2D UI Overlay (HUD, Crosshair, Menus, Loading Screen)
+        vkCmdEndRendering(cmd);
+
+        // =============================================================
+        // Pass 2: Combined Post-Processing (HDR -> Swapchain) & 2D UI Pass
+        // =============================================================
+        postProcessRenderer.transitionHDRForSampling(cmd);
+        swapchain.transitionToColorAttachment(cmd, imageIndex);
+
+        VkRenderingAttachmentInfo swapchainColorAtt{};
+        swapchainColorAtt.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        swapchainColorAtt.imageView = swapchain.getImageView(imageIndex);
+        swapchainColorAtt.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        swapchainColorAtt.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        swapchainColorAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+        VkRenderingInfo swapchainRenderInfo{};
+        swapchainRenderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+        swapchainRenderInfo.renderArea = {{ 0, 0 }, swapchain.getExtent()};
+        swapchainRenderInfo.layerCount = 1;
+        swapchainRenderInfo.colorAttachmentCount = 1;
+        swapchainRenderInfo.pColorAttachments = &swapchainColorAtt;
+        swapchainRenderInfo.pDepthAttachment = nullptr;
+
+        vkCmdBeginRendering(cmd, &swapchainRenderInfo);
+
+        // 1. Tonemap & Composite 3D Scene into Swapchain
+        postProcessRenderer.renderQuad(cmd, swapchain.getExtent(),
+                                       options.exposure, 1.0f, 0.05f, timer.getElapsedTime(),
+                                       options.vibrantVisuals, 0.0f);
+
+        // 2. Crisp 2D UI & Menus Overlay on top
+        VkViewport uiViewport{};
+        uiViewport.x = 0.0f;
+        uiViewport.y = static_cast<float>(swapchain.getExtent().height);
+        uiViewport.width = static_cast<float>(swapchain.getExtent().width);
+        uiViewport.height = -static_cast<float>(swapchain.getExtent().height);
+        uiViewport.minDepth = 0.0f;
+        uiViewport.maxDepth = 1.0f;
+        vkCmdSetViewport(cmd, 0, 1, &uiViewport);
+
+        VkRect2D uiScissor{{ 0, 0 }, swapchain.getExtent()};
+        vkCmdSetScissor(cmd, 0, 1, &uiScissor);
+
         uiPipeline.bind(cmd);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, uiPipeline.getLayout(), 0, 1, &descSet, 0, nullptr);
 
@@ -1295,6 +1495,7 @@ void run() {
 
         if (!commandQueue.endFrame(swapchain, imageIndex)) {
             swapchain.recreate(window.getWidth(), window.getHeight());
+            postProcessRenderer.recreate(window.getWidth(), window.getHeight());
         }
 
         // Max FPS Framerate Limiter

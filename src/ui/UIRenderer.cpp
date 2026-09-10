@@ -19,6 +19,13 @@ UIRenderer::UIRenderer(VulkanContext& context, CommandQueue& cmdQueue)
     : m_context(context)
     , m_cmdQueue(cmdQueue) {
     buildCrosshairMesh();
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        m_uiVertexBuffer[i] = Buffer(m_context, MAX_UI_VBO_SIZE,
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        m_uiIndexBuffer[i] = Buffer(m_context, MAX_UI_IBO_SIZE,
+            VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        m_uiIndexCount[i] = 0;
+    }
 }
 
 void UIRenderer::buildCrosshairMesh() {
@@ -80,7 +87,8 @@ void UIRenderer::buildCrosshairMesh() {
     m_chIbo.uploadStaged(m_context, m_cmdQueue, indices.data(), iSize);
 }
 
-void UIRenderer::updateDynamicUI(const Player& player, uint32_t screenWidth, uint32_t screenHeight, float fps,
+void UIRenderer::updateDynamicUI(uint32_t f,
+                                 const Player& player, uint32_t screenWidth, uint32_t screenHeight, float fps,
                                  const GameOptions& options, const World* world,
                                  bool isChatOpen, const std::string& chatInput,
                                  const std::string& feedbackMsg, float feedbackTimer) {
@@ -426,31 +434,23 @@ void UIRenderer::updateDynamicUI(const Player& player, uint32_t screenWidth, uin
         FontRenderer::drawText(vertices, indices, displayText, 16.0f, chatY + 6.0f, 13.0f, glm::vec3(1.0f, 1.0f, 1.0f), true);
     }
 
-    uint32_t f = m_cmdQueue.getCurrentFrame();
     m_uiIndexCount[f] = static_cast<uint32_t>(indices.size());
     if (m_uiIndexCount[f] == 0) return;
 
     VkDeviceSize vSize = vertices.size() * sizeof(ChunkVertex);
     VkDeviceSize iSize = indices.size() * sizeof(uint32_t);
 
-    m_uiVertexBuffer[f] = Buffer(m_context, vSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE);
-    m_uiVertexBuffer[f].uploadStaged(m_context, m_cmdQueue, vertices.data(), vSize);
+    if (vSize > m_uiVertexBuffer[f].getSize()) {
+        VkDeviceSize newSize = std::max(vSize * 2, static_cast<VkDeviceSize>(MAX_UI_VBO_SIZE));
+        m_uiVertexBuffer[f] = Buffer(m_context, newSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    }
+    if (iSize > m_uiIndexBuffer[f].getSize()) {
+        VkDeviceSize newSize = std::max(iSize * 2, static_cast<VkDeviceSize>(MAX_UI_IBO_SIZE));
+        m_uiIndexBuffer[f] = Buffer(m_context, newSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    }
 
-    m_uiIndexBuffer[f] = Buffer(m_context, iSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE);
-    m_uiIndexBuffer[f].uploadStaged(m_context, m_cmdQueue, indices.data(), iSize);
-
-    m_lastWidth = screenWidth;
-    m_lastHeight = screenHeight;
-    m_lastSelectedSlot = activeSlot;
-    m_lastHealth = health;
-    m_lastOxygen = oxygen;
-    m_lastFPS = static_cast<int>(fps);
-    m_lastDebugHUD = options.debugHUD;
-    m_lastPos = pos;
-    m_lastChatOpen = isChatOpen;
-    m_lastChatInput = chatInput;
-    m_lastFeedbackTimer = feedbackTimer;
-    m_lastCamMode = static_cast<int>(player.getCamera().getMode());
+    m_uiVertexBuffer[f].upload(vertices.data(), vSize);
+    m_uiIndexBuffer[f].upload(indices.data(), iSize);
 }
 
 void UIRenderer::render(VkCommandBuffer cmd,
@@ -469,22 +469,7 @@ void UIRenderer::render(VkCommandBuffer cmd,
     if (screenWidth == 0 || screenHeight == 0) return;
 
     uint32_t f = m_cmdQueue.getCurrentFrame();
-    const glm::vec3& pos = player.getPosition();
-
-    if (screenWidth != m_lastWidth || screenHeight != m_lastHeight ||
-        player.getSelectedSlot() != m_lastSelectedSlot ||
-        std::abs(player.getHealth() - m_lastHealth) > 0.05f ||
-        std::abs(player.getOxygen() - m_lastOxygen) > 0.05f ||
-        std::abs(static_cast<int>(fps) - m_lastFPS) >= 1 ||
-        options.debugHUD != m_lastDebugHUD ||
-        isChatOpen != m_lastChatOpen ||
-        chatInput != m_lastChatInput ||
-        (feedbackTimer > 0.0f) != (m_lastFeedbackTimer > 0.0f) ||
-        static_cast<int>(player.getCamera().getMode()) != m_lastCamMode ||
-        glm::distance(pos, m_lastPos) > 0.05f ||
-        !m_uiVertexBuffer[f].isValid()) {
-        updateDynamicUI(player, screenWidth, screenHeight, fps, options, world, isChatOpen, chatInput, feedbackMsg, feedbackTimer);
-    }
+    updateDynamicUI(f, player, screenWidth, screenHeight, fps, options, world, isChatOpen, chatInput, feedbackMsg, feedbackTimer);
 
     glm::mat4 proj = glm::ortho(0.0f, static_cast<float>(screenWidth), static_cast<float>(screenHeight), 0.0f, -1.0f, 1.0f);
 

@@ -109,17 +109,17 @@ void ShadowMap::updateCascades(const glm::mat4& viewMatrix, float fovRadians, fl
                               float cameraNear, float cameraFar, const glm::vec3& lightDir,
                               int shadowDistanceOption) {
     if (shadowDistanceOption == 0) {
-        m_cascadeSplits[0] = 18.0f;
-        m_cascadeSplits[1] = std::min(cameraFar, 48.0f);
+        m_cascadeSplits[0] = 20.0f;
+        m_cascadeSplits[1] = std::min(cameraFar, 52.0f);
     } else if (shadowDistanceOption == 1) {
-        m_cascadeSplits[0] = 24.0f;
-        m_cascadeSplits[1] = std::min(cameraFar, 80.0f);
+        m_cascadeSplits[0] = 26.0f;
+        m_cascadeSplits[1] = std::min(cameraFar, 90.0f);
     } else if (shadowDistanceOption == 2) {
-        m_cascadeSplits[0] = 32.0f;
-        m_cascadeSplits[1] = std::min(cameraFar, 120.0f);
+        m_cascadeSplits[0] = 34.0f;
+        m_cascadeSplits[1] = std::min(cameraFar, 130.0f);
     } else {
-        m_cascadeSplits[0] = 40.0f;
-        m_cascadeSplits[1] = std::min(cameraFar, 160.0f);
+        m_cascadeSplits[0] = 42.0f;
+        m_cascadeSplits[1] = std::min(cameraFar, 175.0f);
     }
 
     glm::vec3 normalizedLightDir = glm::normalize(lightDir);

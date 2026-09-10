@@ -671,6 +671,38 @@ void World::getLightLevels(int worldX, int y, int worldZ, int s, int& skyLight, 
     }
 }
 
+std::vector<glm::vec3> World::getNearestPlacedTorches(const glm::vec3& refPos, size_t maxCount, float maxDist) const {
+    std::lock_guard<std::mutex> tLock(m_torchesMutex);
+    if (m_placedTorches.empty()) return {};
+
+    struct DistTorch {
+        float distSq;
+        glm::vec3 pos;
+    };
+    std::vector<DistTorch> candidates;
+    float maxDistSq = maxDist * maxDist;
+
+    for (const auto& pos : m_placedTorches) {
+        glm::vec3 diff = pos - refPos;
+        float dSq = glm::dot(diff, diff);
+        if (dSq <= maxDistSq) {
+            candidates.push_back({dSq, pos});
+        }
+    }
+
+    std::sort(candidates.begin(), candidates.end(), [](const DistTorch& a, const DistTorch& b) {
+        return a.distSq < b.distSq;
+    });
+
+    size_t count = std::min(maxCount, candidates.size());
+    std::vector<glm::vec3> result;
+    result.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        result.push_back(candidates[i].pos);
+    }
+    return result;
+}
+
 std::optional<glm::vec3> World::getNearestPlacedTorch(const glm::vec3& refPos, float maxDist) const {
     std::lock_guard<std::mutex> tLock(m_torchesMutex);
     float nearestDistSq = maxDist * maxDist;

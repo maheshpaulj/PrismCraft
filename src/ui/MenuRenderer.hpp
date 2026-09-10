@@ -60,6 +60,9 @@ private:
     VulkanContext& m_context;
     CommandQueue& m_cmdQueue;
 
+    static constexpr VkDeviceSize MAX_MENU_VBO_SIZE = 2 * 1024 * 1024; // 2 MB
+    static constexpr VkDeviceSize MAX_MENU_IBO_SIZE = 1 * 1024 * 1024; // 1 MB
+
     Buffer m_vbo[MAX_FRAMES_IN_FLIGHT];
     Buffer m_ibo[MAX_FRAMES_IN_FLIGHT];
     uint32_t m_indexCount[MAX_FRAMES_IN_FLIGHT]{0, 0};

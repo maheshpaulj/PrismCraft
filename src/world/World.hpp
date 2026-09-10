@@ -71,7 +71,8 @@ public:
     // Light level calculation (0..15)
     void getLightLevels(int worldX, int y, int worldZ, int s, int& skyLight, int& blockLight) const;
 
-    // Nearest placed torch for dynamic point light and shadow casting
+    // Nearest placed torches for dynamic point light and shadow casting
+    [[nodiscard]] std::vector<glm::vec3> getNearestPlacedTorches(const glm::vec3& refPos, size_t maxCount = 4, float maxDist = 24.0f) const;
     [[nodiscard]] std::optional<glm::vec3> getNearestPlacedTorch(const glm::vec3& refPos, float maxDist = 12.0f) const;
     
     int renderDistance = 8; // in chunks

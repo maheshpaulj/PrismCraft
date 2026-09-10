@@ -29,15 +29,19 @@ CommandQueue::CommandQueue(VulkanContext& context) : m_context(context) {
 
     for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         VK_CHECK(vkCreateSemaphore(m_context.getDevice(), &semaphoreInfo, nullptr, &m_imageAvailableSemaphores[i]), "Failed to create semaphore!");
-        VK_CHECK(vkCreateSemaphore(m_context.getDevice(), &semaphoreInfo, nullptr, &m_renderFinishedSemaphores[i]), "Failed to create semaphore!");
         VK_CHECK(vkCreateFence(m_context.getDevice(), &fenceInfo, nullptr, &m_inFlightFences[i]), "Failed to create fence!");
+    }
+    for (size_t i = 0; i < MAX_RENDER_SEMAPHORES; i++) {
+        VK_CHECK(vkCreateSemaphore(m_context.getDevice(), &semaphoreInfo, nullptr, &m_renderFinishedSemaphores[i]), "Failed to create semaphore!");
     }
 }
 
 CommandQueue::~CommandQueue() {
     VkDevice device = m_context.getDevice();
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+    for (size_t i = 0; i < MAX_RENDER_SEMAPHORES; i++) {
         vkDestroySemaphore(device, m_renderFinishedSemaphores[i], nullptr);
+    }
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
         vkDestroySemaphore(device, m_imageAvailableSemaphores[i], nullptr);
         vkDestroyFence(device, m_inFlightFences[i], nullptr);
     }
@@ -81,7 +85,8 @@ bool CommandQueue::endFrame(Swapchain& swapchain, uint32_t imageIndex) {
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &m_commandBuffers[m_currentFrame];
 
-    VkSemaphore signalSemaphores[] = {m_renderFinishedSemaphores[m_currentFrame]};
+    uint32_t renderSemIndex = imageIndex % MAX_RENDER_SEMAPHORES;
+    VkSemaphore signalSemaphores[] = {m_renderFinishedSemaphores[renderSemIndex]};
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 

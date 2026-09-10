@@ -32,8 +32,9 @@ private:
     VulkanContext& m_context;
     VkCommandPool m_commandPool = VK_NULL_HANDLE;
     std::array<VkCommandBuffer, MAX_FRAMES_IN_FLIGHT> m_commandBuffers{};
+    static constexpr size_t MAX_RENDER_SEMAPHORES = 8;
     std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> m_imageAvailableSemaphores{};
-    std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> m_renderFinishedSemaphores{};
+    std::array<VkSemaphore, MAX_RENDER_SEMAPHORES> m_renderFinishedSemaphores{};
     std::array<VkFence, MAX_FRAMES_IN_FLIGHT> m_inFlightFences{};
     uint32_t m_currentFrame = 0;
 };

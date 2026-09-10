@@ -26,6 +26,8 @@ public:
     [[nodiscard]] uint32_t getPresentQueueFamily() const { return m_presentQueueFamily; }
     [[nodiscard]] VkSurfaceKHR getSurface() const { return m_surface; }
     [[nodiscard]] VmaAllocator getAllocator() const { return m_allocator; }
+    [[nodiscard]] bool isAnisotropySupported() const { return m_samplerAnisotropySupported; }
+    [[nodiscard]] float getMaxAnisotropy() const { return m_maxAnisotropy; }
 
 private:
     void createInstance();
@@ -48,6 +50,8 @@ private:
     uint32_t m_graphicsQueueFamily = 0;
     uint32_t m_presentQueueFamily = 0;
     VmaAllocator m_allocator = VK_NULL_HANDLE;
+    bool m_samplerAnisotropySupported = false;
+    float m_maxAnisotropy = 1.0f;
 
     static constexpr bool ENABLE_VALIDATION = 
 #ifdef NDEBUG

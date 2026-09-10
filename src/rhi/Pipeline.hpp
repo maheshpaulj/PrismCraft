@@ -13,9 +13,13 @@ struct PushConstants {
     float skyFog[4];        // 16 bytes (vec4: xyz = fog color, w = fog distance)
     float camPos[4];        // 16 bytes (vec4: xyz = cam pos, w = time)
     float lightColor[4];    // 16 bytes (vec4: xyz = player pos, w = packed yaw/swing/torch)
-    float pointLight1[4];   // 16 bytes (vec4: xyz = dropped torch pos, w = intensity)
-    float pointLight2[4];   // 16 bytes (vec4: xyz = placed torch pos, w = intensity)
+    float pointLight1[4];   // 16 bytes (vec4: xyz = dynamic light 1 pos, w = intensity)
+    float pointLight2[4];   // 16 bytes (vec4: xyz = dynamic light 2 pos, w = intensity)
     float heldTorch[4];     // 16 bytes (vec4: xyz = exact held torch world pos, w = active)
+    float shaderOptions[4]; // 16 bytes (vec4: x=shadowQ, y=waterQ, z=colorGrading, w=settingsFlags)
+    float dayInfo[4];       // 16 bytes (vec4: x=dayFactor, y=sunHeight, z=0, w=0)
+    float pointLight3[4];   // 16 bytes (vec4: xyz = dynamic light 3 pos, w = intensity)
+    float pointLight4[4];   // 16 bytes (vec4: xyz = dynamic light 4 pos, w = intensity)
 };
 
 enum class BlendMode {

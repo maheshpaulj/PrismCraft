@@ -18,46 +18,48 @@ layout(push_constant) uniform PushConstants {
     vec4 pointLight1;
     vec4 pointLight2;
     vec4 heldTorch;
+    vec4 shaderOptions;
+    vec4 dayInfo;
+    vec4 pointLight3;
+    vec4 pointLight4;
 } pc;
 
 layout(location = 0) out vec4 outColor;
 
 // =============================================================
-// TUNABLE VOLUMETRIC CLOUD PARAMETERS
+// TUNABLE VOLUMETRIC CLOUD PARAMETERS (Live Hot-Reload Active)
 // Adjust these parameters to tune density, scale, and lighting
 // =============================================================
 
 // 1. Coverage & Scale (Multi-Scale Puffy Cumulus Formations)
-const float CLOUD_SCALE_UV       = 0.00025;  // Slightly larger physical scale (~4.0 km period)
-const float CLOUD_COVERAGE_BASE  = 0.44;     // Reduced spread between clouds (closer spacing, natural negative space)
-const float CLOUD_COVERAGE_TOP   = 0.68;     // Upward coverage ramp sculpting tall rounded dome tops
-const float CLOUD_REMAP_WIDTH    = 0.120;    // Soft density remap width
-const float CLOUD_DENSITY_MULT   = 1.80;     // Balanced core density
+// CLOUD_SCALE_UV: Controls physical cloud size. ~5.5km atmospheric formations
+const float CLOUD_SCALE_UV       = 0.00018;
 
-// 2. Edge Erosion & Wispy Shredding
-const float EROSION_STRENGTH     = 0.40;     // Detail noise erosion strength
-const float EROSION_BOUNDARY_EXP = 3.20;     // Boundary confinement curve
-const float DETAIL_WARP_STRENGTH = 0.00008;  // Micro curl silhouette warping
+// CLOUD_COVERAGE_BASE: Base threshold for negative space.
+const float CLOUD_COVERAGE_BASE  = 0.30;
+const float CLOUD_COVERAGE_TOP   = 0.50;     // Upward coverage ramp sculpting tall rounded dome tops
+const float CLOUD_REMAP_WIDTH    = 0.320;    // Wide continuous cubic Hermite density remap eliminates sharp edges
+const float CLOUD_DENSITY_MULT   = 1.50;     // Balanced, silky core density
 
-// 3. Volumetric Lighting & Multiple Scattering Fill
-const float BEER_OPTICAL_DENSITY = 1.80;     // Self-shadow optical depth (macro contrast)
-const float POWDER_STRENGTH      = 2.20;     // Powder edge brightening
-const float AMBIENT_SHADOW_MULT  = 0.85;     // Strong sky dome ambient fill (raised from 0.72)
-const float AMBIENT_FLOOR        = 0.28;     // Explicit scattering floor - shadows NEVER crush to black
-const float MULTISCATTER_WEIGHT  = 0.50;     // Dual-octave Beer multiple scattering fill (50% low-extinction core glow)
+// 2. Volumetric Lighting & Multiple Scattering Fill
+const float BEER_OPTICAL_DENSITY = 1.60;     // Self-shadow optical depth
+const float POWDER_STRENGTH      = 2.80;     // Powder edge brightening
+const float AMBIENT_SHADOW_MULT  = 0.90;     // Atmospheric sky dome ambient fill
+const float AMBIENT_FLOOR        = 0.30;     // Explicit scattering floor - shadows NEVER crush to black
+const float MULTISCATTER_WEIGHT  = 0.45;     // Dual-octave Beer multiple scattering fill
 
-// 4. Adaptive Raymarching Integration
-const float STEP_COARSE          = 56.0;     // Empty air space-skipping step in meters
-const float STEP_FINE            = 14.0;     // Dense intra-cloud volumetric step in meters (eliminates slicing)
-const int MAX_STEPS              = 64;       // Maximum adaptive raymarch steps
-const float EXTINCTION_MULT      = 0.035;    // View-ray extinction factor (multi-step depth)
+// 3. Adaptive Uniform Raymarching Integration
+const float STEP_COARSE          = 36.0;     // Smooth empty-air skipping step in meters
+const float STEP_FINE            = 20.0;     // Dense intra-cloud volumetric step in meters
+const int MAX_STEPS              = 36;       // Maximum raymarch steps (fast 100+ FPS)
+const float EXTINCTION_MULT      = 0.032;    // View-ray extinction factor
 
 // =============================================================
 // Atmospheric Slab Dimensions (120 km Earth curvature)
 // =============================================================
 const float R_PLANET = 120000.0; // 120 km planetary radius
-const float Y_BOT = 196.0;       // Cloud base altitude: reduced to 196m as requested!
-const float Y_TOP = 320.0;       // Cloud top altitude (124m tall vertical layer for lofty puffy domes)
+const float Y_BOT = 196.0;       // Cloud base altitude: 196m
+const float Y_TOP = 340.0;       // Cloud top altitude: 340m (144m vertical thickness for lofty puffy domes)
 
 // -------------------------------------------------------------
 // Interleaved Gradient Noise (Jorge Jimenez)
@@ -68,16 +70,38 @@ float interleavedGradientNoise(vec2 screenPos) {
     return fract(52.9829189 * fract(0.06711056 * screenPos.x + 0.00583715 * screenPos.y));
 }
 
-// -------------------------------------------------------------
-// ACES Filmic Tonemapper matching scene lighting
-// -------------------------------------------------------------
-vec3 acesFilmicTonemap(vec3 x) {
-    const float a = 2.51;
-    const float b = 0.03;
-    const float c = 2.43;
-    const float d = 0.59;
-    const float e = 0.14;
-    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+// Accurate piecewise sRGB to Linear EOTF
+vec3 srgbToLinear(vec3 c) {
+    bvec3 cutoff = lessThanEqual(c, vec3(0.04045));
+    vec3 higher = pow((c + vec3(0.055)) / 1.055, vec3(2.4));
+    vec3 lower  = c / 12.92;
+    return mix(higher, lower, cutoff);
+}
+
+// Accurate piecewise Linear to sRGB OETF
+vec3 linearToSrgb(vec3 c) {
+    bvec3 cutoff = lessThanEqual(c, vec3(0.0031308));
+    vec3 higher = 1.055 * pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.4)) - 0.055;
+    vec3 lower  = c * 12.92;
+    return clamp(mix(higher, lower, cutoff), 0.0, 1.0);
+}
+
+// ACES Hill / Narkowicz Fitted tonemapper matching cell.frag
+vec3 acesFilmicTonemap(vec3 color) {
+    const mat3 sRGB_2_AP1 = mat3(
+        0.59719, 0.07600, 0.02840,
+        0.35458, 0.90834, 0.13383,
+        0.04823, 0.01566, 0.83777
+    );
+    const mat3 AP1_2_sRGB = mat3(
+        1.60475, -0.10208, -0.00327,
+        -0.53108,  1.10813, -0.07276,
+        -0.07367, -0.00605,  1.07602
+    );
+    vec3 v = sRGB_2_AP1 * color;
+    vec3 a = v * (v + 0.0245786) - 0.000090537;
+    vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+    return clamp(AP1_2_sRGB * (a / b), 0.0, 1.0);
 }
 
 bool solveQuad(float A, float B, float C, out float t1, out float t2) {
@@ -135,54 +159,38 @@ float sampleCloudDensity(vec3 p, vec2 wind) {
     float yCurved = p.y + (dHoriz * dHoriz) / (2.0 * R_PLANET);
     if (yCurved < Y_BOT || yCurved > Y_TOP) return 0.0;
 
-    // 1. Height-based density gradient:
-    // Flat defined base (tapers quickly at h = 0.0 - 0.16), tapering smoothly to a compact dome top (h = 0.50 - 1.0)
+    // 1. Vertical density profile: flat defined base, tapering to lofty rounded dome tops
     float h = clamp((yCurved - Y_BOT) / (Y_TOP - Y_BOT), 0.0, 1.0);
-    float baseTaper = smoothstep(0.0, 0.16, h);
-    float topTaper  = smoothstep(1.0, 0.50, h);
+    float baseTaper = smoothstep(0.0, 0.12, h);
+    float topTaper  = smoothstep(1.0, 0.38, h);
     float heightGradient = baseTaper * topTaper;
     if (heightGradient <= 0.001) return 0.0;
 
-    // World-space UVs with animated wind drift
+    // 2. World-space UVs with gentle wind drift & vertical billow expansion
     vec2 wsUV = (p.xz + wind) * CLOUD_SCALE_UV;
-
-    // Cauliflower billow vertical expansion with height
-    vec2 heightShear = vec2((h - 0.4) * 0.00016, (h - 0.4) * 0.00008);
+    vec2 heightShear = vec2((h - 0.35) * 0.00010, (h - 0.35) * 0.00005);
     vec2 uv = wsUV + heightShear;
 
-    // 2. Sample baked 4-channel seeded periodic noise texture
-    // Explicit textureLod(..., 0.0) bypasses quad derivatives, eliminating speckling in dynamic loops
+    // 3. Multi-octave smooth cloud texture sampling
     vec4 tBase = textureLod(cloudTexture, uv, 0.0);
-    vec4 tMid  = textureLod(cloudTexture, uv * 2.3 + vec2(0.18, 0.42), 0.0);
-    vec4 tSmall = textureLod(cloudTexture, uv * 5.2 + vec2(0.51, 0.79), 0.0);
+    vec4 tMid  = textureLod(cloudTexture, uv * 2.2 + vec2(0.24, 0.58), 0.0);
+    vec4 tSmall = textureLod(cloudTexture, uv * 4.6 + vec2(0.61, 0.37), 0.0);
 
-    // Multi-scale cloud sizing: large towering domes, medium companion billows, and small fluffy puffs
-    float macroPuff = tBase.r * 0.65 + tBase.g * 0.35;
-    float midPuff   = tMid.r * 0.55 + tMid.g * 0.45;
-    float smallPuff = tSmall.g * 0.60 + tSmall.b * 0.40;
+    // Multi-scale cloud profiles: broad towering domes, companion billows, and soft atmospheric wisps
+    float macroPuff = tBase.r * 0.60 + tBase.g * 0.40;
+    float midPuff   = tMid.r * 0.50 + tMid.g * 0.50;
+    float smallPuff = tSmall.b * 0.65 + tSmall.a * 0.35;
 
-    // Blended multi-scale profile: gives variety of sizes across the sky and fills in empty spread
-    float baseMacro = macroPuff * 0.60 + midPuff * 0.28 + smallPuff * (0.12 * (1.0 - h * 0.5));
+    float baseMacro = macroPuff * 0.58 + midPuff * 0.28 + smallPuff * (0.14 * (1.0 - h * 0.4));
 
-    // Height-dependent coverage: contracts perimeter inward with altitude to sculpt compact puffy domes
-    float coverage = mix(CLOUD_COVERAGE_BASE, CLOUD_COVERAGE_TOP, smoothstep(0.08, 0.70, h));
+    // Height-dependent coverage: sculpts lofty rounded cumulus dome tops
+    float coverage = mix(CLOUD_COVERAGE_BASE, CLOUD_COVERAGE_TOP, smoothstep(0.10, 0.80, h));
     float denseRaw = baseMacro - coverage;
 
-    // Negative space check: clear sky gaps
-    if (denseRaw < -0.12) return 0.0;
+    if (denseRaw < -0.15) return 0.0;
 
-    // 3. Edge erosion near density falloff boundary
-    float boundary = clamp(1.0 - denseRaw * EROSION_BOUNDARY_EXP, 0.0, 1.0);
-
-    // Detail noise sample (Channel B = Perlin FBM, Channel A = Micro curl wisps)
-    vec2 detailUV = uv * 3.6 + vec2(0.23, 0.47) + (tBase.ba - vec2(0.5)) * (boundary * DETAIL_WARP_STRENGTH);
-    vec4 tDetail = textureLod(cloudTexture, detailUV, 0.0);
-
-    float erosionNoise = tDetail.b * 0.70 + tDetail.a * 0.30;
-    float erodedShape = baseMacro - erosionNoise * boundary * EROSION_STRENGTH;
-
-    // Soft density remap: wide transition band (0.120) produces continuous volumetric gradient
-    float density = smoothstep(coverage, coverage + CLOUD_REMAP_WIDTH, erodedShape) * heightGradient * CLOUD_DENSITY_MULT;
+    // Continuous cubic Hermite density remapping - produces silky, billowy, zero-stipple volume
+    float density = smoothstep(-0.06, CLOUD_REMAP_WIDTH, denseRaw) * heightGradient * CLOUD_DENSITY_MULT;
     return density;
 }
 
@@ -202,8 +210,50 @@ void main() {
     }
 
     vec3 L = normalize(pc.sunDir.xyz);
-    float isDay = clamp(pc.skyFog.b * 1.8 - 0.25, 0.0, 1.0);
-    vec2 wind = vec2(pc.camPos.w * 1.6, 0.0);
+    float isDay = pc.dayInfo.x;
+    float actualSunY = pc.dayInfo.y;
+    bool vibrant = (pc.sunDir.w > 0.0);
+    vec2 wind = vec2(pc.camPos.w * 4.2, pc.camPos.w * 1.6);
+
+    // -------------------------------------------------------------
+    // 2D Flat Triangular Clouds (PrismCraft Non-Vibrant / Classic Mode)
+    // -------------------------------------------------------------
+    if (!vibrant) {
+        if (rayDir.y <= 0.015) discard;
+        float cloudH = 175.0;
+        float t = (cloudH - cam.y) / rayDir.y;
+        if (t <= 0.0 || t > 8500.0) discard;
+
+        vec3 hitP = cam + rayDir * t;
+        vec2 uv = (hitP.xz + wind * 3.0) * 0.005;
+
+        // Equilateral Triangular Lattice
+        mat2 toTri = mat2(1.0, 0.0, -0.57735027, 1.15470054);
+        vec2 triCoord = toTri * uv;
+        vec2 triId = floor(triCoord);
+        vec2 triFrac = fract(triCoord);
+        bool isUpper = (triFrac.x + triFrac.y > 1.0);
+        vec2 triCenter = triId + (isUpper ? vec2(0.6667, 0.6667) : vec2(0.3333, 0.3333));
+
+        vec2 noiseUV = triCenter * 0.05;
+        float cNoise = texture(cloudTexture, noiseUV).r;
+        if (cNoise < 0.44) discard;
+
+        float edgeDist = min(min(triFrac.x, triFrac.y), abs(1.0 - (triFrac.x + triFrac.y)));
+        float edgeOutline = smoothstep(0.015, 0.07, edgeDist);
+
+        float goldenHour = smoothstep(0.40, 0.02, actualSunY) * step(-0.05, actualSunY);
+        vec3 cloudColor = mix(vec3(0.32, 0.38, 0.52), mix(vec3(0.98, 0.98, 0.98), vec3(1.15, 0.82, 0.52), goldenHour), isDay);
+        cloudColor *= (0.88 + 0.12 * edgeOutline);
+
+        float horizDist = length(hitP.xz - cam.xz);
+        float fade = 1.0 - smoothstep(2200.0, 7500.0, horizDist);
+        float alpha = clamp((cNoise - 0.44) * 3.2, 0.0, 0.88) * fade;
+        if (alpha < 0.02) discard;
+
+        outColor = vec4(cloudColor, alpha);
+        return;
+    }
 
     // Interleaved Gradient Noise per-pixel dither offset [0, 1)
     float dither = interleavedGradientNoise(gl_FragCoord.xy);
@@ -211,8 +261,7 @@ void main() {
     // -------------------------------------------------------------
     // Dynamic Time-of-Day Sun & Sky Color Palette
     // -------------------------------------------------------------
-    float sunElev = L.y;
-    float goldenHour = smoothstep(0.48, 0.05, sunElev) * step(0.0, sunElev);
+    float goldenHour = smoothstep(0.40, 0.02, actualSunY) * step(-0.05, actualSunY);
 
     // Warm Solar Spectrum (Direct Sunlight)
     // Midday: warm solar white (~5500K, not sterile flat RGB white)
@@ -252,7 +301,7 @@ void main() {
     // Limit maximum raymarch distance inside cloud slab
     float maxDist = min(tExit, tEnter + 3800.0);
     float stepSize = STEP_COARSE;
-    float tCurrent = tEnter + dither * STEP_COARSE;
+    float tCurrent = tEnter + dither * 2.5;
 
     vec3 accumColor = vec3(0.0);
     float transmittance = 1.0;
@@ -264,46 +313,44 @@ void main() {
         vec3 p = cam + rayDir * tCurrent;
         float density = sampleCloudDensity(p, wind);
 
-        if (density > 0.003) {
-            // If we were marching coarsely, back up half a coarse step and switch to fine 14m steps
-            if (stepSize > STEP_FINE * 1.5) {
-                tCurrent -= STEP_COARSE * 0.5;
+        if (density > 0.002) {
+            // Switch to fine steps inside cloud volume
+            if (stepSize > STEP_FINE * 1.2) {
+                tCurrent -= (stepSize - STEP_FINE);
                 stepSize = STEP_FINE;
-                tCurrent += stepSize;
                 zeroDensityStreak = 0;
                 continue;
             }
 
             zeroDensityStreak = 0;
 
-            // Dual stratified sun rays (+16m and +48m) along light direction L
-            float dLightNear = sampleCloudDensity(p + L * 16.0, wind);
-            float dLightFar  = sampleCloudDensity(p + L * 48.0, wind);
-            float totalSunOpticalDepth = dLightNear * 0.65 + dLightFar * 0.35;
+            // Direct sun ray sample along light direction L
+            float dLight = sampleCloudDensity(p + L * 28.0, wind);
+            float totalSunOpticalDepth = dLight * BEER_OPTICAL_DENSITY;
 
             // Dual-octave Beer's law multiple-scattering approximation
-            float beer1 = exp(-totalSunOpticalDepth * BEER_OPTICAL_DENSITY * 2.2);
-            float beer2 = exp(-totalSunOpticalDepth * BEER_OPTICAL_DENSITY * 0.45);
+            float beer1 = exp(-totalSunOpticalDepth * 2.2);
+            float beer2 = exp(-totalSunOpticalDepth * 0.40);
             float beerMultiscatter = mix(beer1, beer2, MULTISCATTER_WEIGHT);
 
             // Powder effect: edge brightening for forward-facing thin wisps
             float powderTerm = 1.0 - exp(-max(density, 0.001) * POWDER_STRENGTH);
-            float directSunTransmittance = clamp(beerMultiscatter * powderTerm * 2.2, 0.0, 1.0);
+            float directSunTransmittance = clamp(beerMultiscatter * (powderTerm * 1.6 + 0.35), 0.0, 1.0);
 
             // Dynamic Hemispherical Ambient Sky Fill
             float dHoriz = length(p.xz - cam.xz);
             float yCurved = p.y + (dHoriz * dHoriz) / (2.0 * R_PLANET);
             float h = clamp((yCurved - Y_BOT) / (Y_TOP - Y_BOT), 0.0, 1.0);
 
-            vec3 ambientShade = mix(activeGroundBounce, activeZenithSky, smoothstep(0.05, 0.65, h));
+            vec3 ambientShade = mix(activeGroundBounce, activeZenithSky, smoothstep(0.05, 0.70, h));
 
             // Hard Ambient Floor: GUARANTEES shadows never crush to black!
-            vec3 ambientFloorColor = max(activeZenithSky * 0.65, vec3(0.28, 0.32, 0.42) * isDay);
+            vec3 ambientFloorColor = max(activeZenithSky * 0.55, vec3(0.24, 0.28, 0.38) * isDay);
             ambientShade = max(ambientShade * AMBIENT_SHADOW_MULT, ambientFloorColor);
 
             vec3 inscatter = mix(ambientShade, litSurfaceColor, directSunTransmittance * isDay);
 
-            // Soft Beer-Lambert extinction along view ray (stepSize is 14m here!)
+            // Soft Beer-Lambert extinction along view ray
             float stepAlpha = 1.0 - exp(-density * EXTINCTION_MULT * stepSize);
             accumColor += transmittance * inscatter * stepAlpha;
             transmittance *= (1.0 - stepAlpha);
@@ -320,30 +367,30 @@ void main() {
 
     // Crepuscular forward sun glow
     float sunProximity = pow(max(cosTheta * 0.5 + 0.5, 0.0), 4.2);
-    vec3 crepuscularShafts = sunColor * (sunProximity * 1.5) * (0.35 + goldenHour * 0.65) * isDay;
+    vec3 crepuscularShafts = sunColor * (sunProximity * 1.4) * (0.35 + goldenHour * 0.65) * isDay;
     accumColor += crepuscularShafts * (1.0 - transmittance);
 
     float cloudAlpha = 1.0 - transmittance;
-    if (cloudAlpha < 0.008) {
-        discard;
-    }
 
     // Atmospheric horizon distance blend:
-    // Seamlessly fades clouds into the distant sky dome between 3,500m and 12,000m (750 chunks)
+    // Seamlessly fades clouds into the distant sky dome between 2,400m and 8,500m
     float dist = tEnter;
-    float fogStart = 3500.0;
-    float fogEnd   = 12000.0;
-    float fogFactor = clamp((dist - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
-    fogFactor = fogFactor * fogFactor;
+    float fogStart = 2400.0;
+    float fogEnd   = 8500.0;
+    float fogFactor = smoothstep(fogStart, fogEnd, dist);
 
     // Un-premultiply accumulated color so hardware SRC_ALPHA blend doesn't square alpha and crush shadows to black
     vec3 cloudRgb = accumColor / max(cloudAlpha, 0.0001);
 
-    vec3 goldenFog = mix(pc.skyFog.rgb, vec3(1.50, 1.10, 0.60), goldenHour * 0.40);
+    vec3 linearSkyFog = srgbToLinear(pc.skyFog.rgb);
+    vec3 goldenFog = mix(linearSkyFog, vec3(1.40, 1.05, 0.65), goldenHour * 0.45);
     vec3 finalColor = mix(cloudRgb, goldenFog, fogFactor);
     float finalAlpha = cloudAlpha * (1.0 - fogFactor);
 
-    finalColor = acesFilmicTonemap(finalColor);
+    if (finalAlpha < 0.002) {
+        discard;
+    }
 
+    // Output linear HDR radiance directly to HDR buffer (master tonemapping handled in post-processing pass)
     outColor = vec4(finalColor, finalAlpha);
 }

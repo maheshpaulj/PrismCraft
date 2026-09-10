@@ -18,6 +18,13 @@ namespace prismcraft {
 MenuRenderer::MenuRenderer(VulkanContext& context, CommandQueue& cmdQueue)
     : m_context(context)
     , m_cmdQueue(cmdQueue) {
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        m_vbo[i] = Buffer(m_context, MAX_MENU_VBO_SIZE,
+            VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        m_ibo[i] = Buffer(m_context, MAX_MENU_IBO_SIZE,
+            VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        m_indexCount[i] = 0;
+    }
 }
 
 struct InventoryLayout {
@@ -313,28 +320,24 @@ int MenuRenderer::handleClick(GameState& state, Player& player, glm::vec2 mouseP
             return (mousePos.x >= bx && mousePos.x <= bx + bw && mousePos.y >= by && mousePos.y <= by + bh);
         };
 
-        // Row 0: VIBRANT SHADERS (toggle, left) | SHADOW QUALITY (toggle, right)
+        // Row 0: VIBRANT VISUALS (toggle, left) | RENDER DISTANCE (slider, right)
         if (inBox(lx, y0, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
             options.vibrantVisuals = !options.vibrantVisuals;
             return 19;
         }
-        if (inBox(rx, y0, bW, bH) && !isDown) {
-            AudioEngine::get().playSound(SoundEffect::Click);
-            options.shadowQuality = (options.shadowQuality + 1) % 4;
-            return 24;
+        if (inBox(rx, y0, bW, bH)) {
+            float t = std::clamp((mousePos.x - rx) / bW, 0.0f, 1.0f);
+            int targetRD = static_cast<int>(std::round(2.0f + t * 30.0f));
+            targetRD = std::clamp((targetRD / 2) * 2, 2, 32);
+            if (targetRD != options.renderDistance) {
+                options.renderDistance = targetRD;
+                return 17;
+            }
         }
 
-        // Row 1: RENDER DISTANCE (toggle, left) | MAX FPS (toggle, right)
+        // Row 1: MAX FPS (toggle, left) | VSYNC (toggle, right)
         if (inBox(lx, y0 + dy, bW, bH) && !isDown) {
-            AudioEngine::get().playSound(SoundEffect::Click);
-            static const int rdList[] = {4, 6, 8, 10, 12, 14, 16, 20, 24};
-            int curIdx = 2;
-            for (int k = 0; k < 9; ++k) { if (rdList[k] == options.renderDistance) { curIdx = k; break; } }
-            options.renderDistance = rdList[(curIdx + 1) % 9];
-            return 17;
-        }
-        if (inBox(rx, y0 + dy, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
             static const int fpsList[] = {0, 30, 60, 90, 120, 144, 240};
             int curIdx = 0;
@@ -342,27 +345,32 @@ int MenuRenderer::handleClick(GameState& state, Player& player, glm::vec2 mouseP
             options.maxFps = fpsList[(curIdx + 1) % 7];
             return 15;
         }
-
-        // Row 2: WATER & SSR (toggle, left) | COLOR GRADING (toggle, right)
-        if (inBox(lx, y0 + dy * 2.0f, bW, bH) && !isDown) {
+        if (inBox(rx, y0 + dy, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
-            options.waterQuality = (options.waterQuality + 1) % 3;
+            options.vsync = !options.vsync;
+            return 16;
+        }
+
+        // Row 2 (Vibrant only): WATER (Vanilla / RTX, left) | SHADOW QUALITY (toggle, right)
+        if (inBox(lx, y0 + dy * 2.0f, bW, bH) && !isDown && options.vibrantVisuals) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.waterQuality = (options.waterQuality >= 2) ? 0 : 2;
             return 25;
         }
-        if (inBox(rx, y0 + dy * 2.0f, bW, bH) && !isDown) {
+        if (inBox(rx, y0 + dy * 2.0f, bW, bH) && !isDown && options.vibrantVisuals) {
             AudioEngine::get().playSound(SoundEffect::Click);
-            options.colorGrading = (options.colorGrading + 1) % 5;
-            return 26;
+            options.shadowQuality = (options.shadowQuality + 1) % 4;
+            return 24;
         }
 
-        // Row 3: CLOUDS 3D (toggle, left) | CLOUD SHADOWS (toggle, right)
-        if (inBox(lx, y0 + dy * 3.0f, bW, bH) && !isDown) {
+        // Row 3 (Vibrant only): CLOUDS (3D toggle, left) | CLOUD SEED (cycle, right)
+        if (inBox(lx, y0 + dy * 3.0f, bW, bH) && !isDown && options.vibrantVisuals) {
             AudioEngine::get().playSound(SoundEffect::Click);
             options.clouds = !options.clouds;
             options.cloudShadows = options.clouds;
             return 18;
         }
-        if (inBox(rx, y0 + dy * 3.0f, bW, bH) && !isDown) {
+        if (inBox(rx, y0 + dy * 3.0f, bW, bH) && !isDown && options.vibrantVisuals) {
             AudioEngine::get().playSound(SoundEffect::Click);
             static const int seedList[] = {1337, 42, 101, 777, 2026, 9999};
             int curIdx = 0;
@@ -371,20 +379,29 @@ int MenuRenderer::handleClick(GameState& state, Player& player, glm::vec2 mouseP
             return 27;
         }
 
-        // Row 4: SMOOTH LIGHTING (toggle, left) | STEVE SHADOW (toggle, right)
+        // Row 4: CONTACT SHADING (cycle: REALISTIC -> ENHANCED -> OFF) | STEVE SHADOW (toggle, right)
         if (inBox(lx, y0 + dy * 4.0f, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
-            options.smoothLighting = !options.smoothLighting;
+            if (!options.smoothLighting || options.aoStrength <= 0.01f) {
+                options.smoothLighting = true;
+                options.aoStrength = 1.0f;
+            } else if (options.aoStrength < 1.2f) {
+                options.smoothLighting = true;
+                options.aoStrength = 1.4f;
+            } else {
+                options.smoothLighting = false;
+                options.aoStrength = 0.0f;
+            }
             return 29;
         }
-        if (inBox(rx, y0 + dy * 4.0f, bW, bH) && !isDown) {
+        if (inBox(rx, y0 + dy * 4.0f, bW, bH) && !isDown && options.vibrantVisuals) {
             AudioEngine::get().playSound(SoundEffect::Click);
             options.playerShadow = !options.playerShadow;
             return 28;
         }
 
         // Row 5: ATMOSPHERE FOG (toggle, left) | LOD PRESET (toggle, right)
-        if (inBox(lx, y0 + dy * 5.0f, bW, bH) && !isDown) {
+        if (inBox(lx, y0 + dy * 5.0f, bW, bH) && !isDown && options.vibrantVisuals) {
             AudioEngine::get().playSound(SoundEffect::Click);
             options.atmosphericFog = (options.atmosphericFog + 1) % 3;
             return 30;
@@ -395,13 +412,8 @@ int MenuRenderer::handleClick(GameState& state, Player& player, glm::vec2 mouseP
             return 21;
         }
 
-        // Row 6: VSYNC (toggle, left) | UI SCALE (toggle, right)
+        // Row 6: UI SCALE (toggle, left) | RESOLUTION (toggle, right)
         if (inBox(lx, y0 + dy * 6.0f, bW, bH) && !isDown) {
-            AudioEngine::get().playSound(SoundEffect::Click);
-            options.vsync = !options.vsync;
-            return 16;
-        }
-        if (inBox(rx, y0 + dy * 6.0f, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
             if (options.uiScale < 1.25f) options.uiScale = 1.5f;
             else if (options.uiScale < 1.75f) options.uiScale = 2.0f;
@@ -410,14 +422,14 @@ int MenuRenderer::handleClick(GameState& state, Player& player, glm::vec2 mouseP
             else options.uiScale = 1.0f;
             return 12;
         }
-
-        // Row 7: RESOLUTION (toggle, left) | WINDOW MODE (toggle, right)
-        if (inBox(lx, y0 + dy * 7.0f, bW, bH) && !isDown) {
+        if (inBox(rx, y0 + dy * 6.0f, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
             options.resIndex = (options.resIndex + 1) % 4;
             return 14;
         }
-        if (inBox(rx, y0 + dy * 7.0f, bW, bH) && !isDown) {
+
+        // Row 7: WINDOW MODE (toggle, left)
+        if (inBox(lx, y0 + dy * 7.0f, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
             options.windowMode = (options.windowMode + 1) % 3;
             return 13;
@@ -1149,66 +1161,84 @@ void MenuRenderer::rebuildMenuMesh(GameState state, const Player& player, uint32
             return (mousePos.x >= bx_ && mousePos.x <= bx_ + bw_ && mousePos.y >= by_ && mousePos.y <= by_ + bh_);
         };
 
-        // Row 0: VIBRANT SHADERS | SHADOW QUALITY
-        std::string vibStr = options.vibrantVisuals ? "VIBRANT SHADERS: ON" : "VIBRANT SHADERS: OFF";
+        // Row 0: VIBRANT VISUALS | RENDER DISTANCE (SLIDER)
+        std::string vibStr = options.vibrantVisuals ? "VIBRANT VISUALS: ON" : "VIBRANT VISUALS: OFF";
         addRectButton(lx, y0, bW, bH, vibStr, inBox(lx, y0, bW, bH), options.vibrantVisuals);
 
-        const char* shadowNames[] = {"SHADOWS: OFF", "SHADOWS: LOW", "SHADOWS: MEDIUM", "SHADOWS: HIGH"};
-        addRectButton(rx, y0, bW, bH, shadowNames[std::clamp(options.shadowQuality, 0, 3)], inBox(rx, y0, bW, bH), options.shadowQuality > 0);
-
-        // Row 1: RENDER DISTANCE | MAX FPS
+        float rdRatio = std::clamp(static_cast<float>(options.renderDistance - 2) / 30.0f, 0.0f, 1.0f);
         char rdBuf[64];
-        std::snprintf(rdBuf, sizeof(rdBuf), "TERRAIN CHUNKS: %d", options.renderDistance);
-        addRectButton(lx, y0 + dy, bW, bH, rdBuf, inBox(lx, y0 + dy, bW, bH), true);
+        std::snprintf(rdBuf, sizeof(rdBuf), "RENDER DISTANCE: %d CHUNKS", options.renderDistance);
+        addSlider(rx, y0, bW, bH, rdRatio, rdBuf, inBox(rx, y0, bW, bH));
 
+        // Row 1: MAX FPS | VSYNC
         char fpsBuf[64];
         if (options.maxFps <= 0) std::snprintf(fpsBuf, sizeof(fpsBuf), "MAX FPS: UNLIMITED");
         else std::snprintf(fpsBuf, sizeof(fpsBuf), "MAX FPS: %d FPS", options.maxFps);
-        addRectButton(rx, y0 + dy, bW, bH, fpsBuf, inBox(rx, y0 + dy, bW, bH), true);
+        addRectButton(lx, y0 + dy, bW, bH, fpsBuf, inBox(lx, y0 + dy, bW, bH), true);
 
-        // Row 2: WATER & SSR | COLOR GRADING
-        const char* waterNames[] = {"WATER: FAST", "WATER: REALISTIC", "WATER: RTX SSR"};
-        addRectButton(lx, y0 + dy * 2.0f, bW, bH, waterNames[std::clamp(options.waterQuality, 0, 2)], inBox(lx, y0 + dy * 2.0f, bW, bH), true);
+        std::string vsyncStr = options.vsync ? "VSYNC: ENABLED" : "VSYNC: DISABLED";
+        addRectButton(rx, y0 + dy, bW, bH, vsyncStr, inBox(rx, y0 + dy, bW, bH), options.vsync);
 
-        const char* gradeNames[] = {"COLOR: DEFAULT", "COLOR: CINEMATIC", "COLOR: VIBRANT", "COLOR: WARM", "COLOR: COOL"};
-        addRectButton(rx, y0 + dy * 2.0f, bW, bH, gradeNames[std::clamp(options.colorGrading, 0, 4)], inBox(rx, y0 + dy * 2.0f, bW, bH), options.colorGrading > 0);
+        // Row 2 (Vibrant only): WATER | SHADOW QUALITY
+        std::string waterStr = options.vibrantVisuals
+            ? (options.waterQuality >= 2 ? "WATER: RTX" : "WATER: VANILLA")
+            : "WATER: VANILLA (LOCKED)";
+        addRectButton(lx, y0 + dy * 2.0f, bW, bH, waterStr, inBox(lx, y0 + dy * 2.0f, bW, bH), options.vibrantVisuals && (options.waterQuality >= 2));
 
-        // Row 3: CLOUDS 3D | CLOUD SEED
-        std::string cloudStr = options.clouds ? "CLOUDS: VOLUMETRIC 3D" : "CLOUDS: OFF";
-        addRectButton(lx, y0 + dy * 3.0f, bW, bH, cloudStr, inBox(lx, y0 + dy * 3.0f, bW, bH), options.clouds);
+        const char* shadowNames[] = {"SHADOWS: OFF", "SHADOWS: LOW", "SHADOWS: MEDIUM", "SHADOWS: HIGH"};
+        std::string shadowStr = options.vibrantVisuals
+            ? shadowNames[std::clamp(options.shadowQuality, 0, 3)]
+            : "SHADOWS: BASIC (LOCKED)";
+        addRectButton(rx, y0 + dy * 2.0f, bW, bH, shadowStr, inBox(rx, y0 + dy * 2.0f, bW, bH), options.vibrantVisuals && (options.shadowQuality > 0));
+
+        // Row 3 (Vibrant only): CLOUDS | CLOUD SEED
+        std::string cloudStr = options.vibrantVisuals
+            ? (options.clouds ? "CLOUDS: VOLUMETRIC 3D" : "CLOUDS: OFF")
+            : "CLOUDS: 2D PRISM (LOCKED)";
+        addRectButton(lx, y0 + dy * 3.0f, bW, bH, cloudStr, inBox(lx, y0 + dy * 3.0f, bW, bH), options.vibrantVisuals && options.clouds);
 
         char cSeedBuf[64];
         std::snprintf(cSeedBuf, sizeof(cSeedBuf), "CLOUD SEED: %d", options.cloudSeed);
-        addRectButton(rx, y0 + dy * 3.0f, bW, bH, cSeedBuf, inBox(rx, y0 + dy * 3.0f, bW, bH), true);
+        std::string seedStr = options.vibrantVisuals ? cSeedBuf : "CLOUD SEED: OFF";
+        addRectButton(rx, y0 + dy * 3.0f, bW, bH, seedStr, inBox(rx, y0 + dy * 3.0f, bW, bH), options.vibrantVisuals);
 
-        // Row 4: SMOOTH LIGHTING / SSAO | STEVE SHADOW
-        std::string aoStr = options.smoothLighting ? "SMOOTH LIGHT / SSAO: ON" : "SMOOTH LIGHT: OFF";
-        addRectButton(lx, y0 + dy * 4.0f, bW, bH, aoStr, inBox(lx, y0 + dy * 4.0f, bW, bH), options.smoothLighting);
+        // Row 4: CONTACT SHADING | STEVE SHADOW
+        std::string aoStr;
+        if (!options.smoothLighting || options.aoStrength <= 0.01f) {
+            aoStr = "CONTACT SHADING: OFF";
+        } else if (options.aoStrength > 1.2f) {
+            aoStr = "CONTACT SHADING: ENHANCED";
+        } else {
+            aoStr = "CONTACT SHADING: REALISTIC";
+        }
+        addRectButton(lx, y0 + dy * 4.0f, bW, bH, aoStr, inBox(lx, y0 + dy * 4.0f, bW, bH), options.smoothLighting && options.aoStrength > 0.01f);
 
-        std::string pShadowStr = options.playerShadow ? "STEVE SHADOW: ON" : "STEVE SHADOW: OFF";
-        addRectButton(rx, y0 + dy * 4.0f, bW, bH, pShadowStr, inBox(rx, y0 + dy * 4.0f, bW, bH), options.playerShadow);
+        std::string pShadowStr = options.vibrantVisuals
+            ? (options.playerShadow ? "STEVE SHADOW: ON" : "STEVE SHADOW: OFF")
+            : "STEVE SHADOW: OFF (LOCKED)";
+        addRectButton(rx, y0 + dy * 4.0f, bW, bH, pShadowStr, inBox(rx, y0 + dy * 4.0f, bW, bH), options.vibrantVisuals && options.playerShadow);
 
         // Row 5: ATMOSPHERE FOG | LOD PRESET
         const char* atmosNames[] = {"ATMOSPHERE: OFF", "ATMOSPHERE: SUBTLE", "ATMOSPHERE: DENSE"};
-        addRectButton(lx, y0 + dy * 5.0f, bW, bH, atmosNames[std::clamp(options.atmosphericFog, 0, 2)], inBox(lx, y0 + dy * 5.0f, bW, bH), options.atmosphericFog > 0);
+        std::string atmosStr = options.vibrantVisuals
+            ? atmosNames[std::clamp(options.atmosphericFog, 0, 2)]
+            : "ATMOSPHERE: OFF (LOCKED)";
+        addRectButton(lx, y0 + dy * 5.0f, bW, bH, atmosStr, inBox(lx, y0 + dy * 5.0f, bW, bH), options.vibrantVisuals && (options.atmosphericFog > 0));
 
         const char* lodNames[] = {"LOD: PERFORMANCE", "LOD: BALANCED", "LOD: QUALITY", "LOD: ULTRA"};
         addRectButton(rx, y0 + dy * 5.0f, bW, bH, lodNames[std::clamp(options.lodPreset, 0, 3)], inBox(rx, y0 + dy * 5.0f, bW, bH), true);
 
-        // Row 6: VSYNC | UI SCALE
-        std::string vsyncStr = options.vsync ? "VSYNC: ENABLED" : "VSYNC: DISABLED";
-        addRectButton(lx, y0 + dy * 6.0f, bW, bH, vsyncStr, inBox(lx, y0 + dy * 6.0f, bW, bH), options.vsync);
-
+        // Row 6: UI SCALE | RESOLUTION
         char uiBuf[64];
         std::snprintf(uiBuf, sizeof(uiBuf), "UI SCALE: %.1fx", options.uiScale);
-        addRectButton(rx, y0 + dy * 6.0f, bW, bH, uiBuf, inBox(rx, y0 + dy * 6.0f, bW, bH), true);
+        addRectButton(lx, y0 + dy * 6.0f, bW, bH, uiBuf, inBox(lx, y0 + dy * 6.0f, bW, bH), true);
 
-        // Row 7: RESOLUTION | WINDOW MODE
         const char* resNames[] = {"RES: 1280x720", "RES: 1600x900", "RES: 1920x1080", "RES: 2560x1440"};
-        addRectButton(lx, y0 + dy * 7.0f, bW, bH, resNames[std::clamp(options.resIndex, 0, 3)], inBox(lx, y0 + dy * 7.0f, bW, bH), true);
+        addRectButton(rx, y0 + dy * 6.0f, bW, bH, resNames[std::clamp(options.resIndex, 0, 3)], inBox(rx, y0 + dy * 6.0f, bW, bH), true);
 
+        // Row 7: WINDOW MODE
         const char* winModes[] = {"MODE: WINDOWED", "MODE: BORDERLESS", "MODE: FULLSCREEN"};
-        addRectButton(rx, y0 + dy * 7.0f, bW, bH, winModes[std::clamp(options.windowMode, 0, 2)], inBox(rx, y0 + dy * 7.0f, bW, bH), true);
+        addRectButton(lx, y0 + dy * 7.0f, bW, bH, winModes[std::clamp(options.windowMode, 0, 2)], inBox(lx, y0 + dy * 7.0f, bW, bH), true);
 
         // Row 8: DONE / BACK (center)
         float doneW = 320.0f;
@@ -1678,11 +1708,17 @@ void MenuRenderer::rebuildMenuMesh(GameState state, const Player& player, uint32
     VkDeviceSize vSize = vertices.size() * sizeof(ChunkVertex);
     VkDeviceSize iSize = indices.size() * sizeof(uint32_t);
 
-    m_vbo[f] = Buffer(m_context, vSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE);
-    m_vbo[f].uploadStaged(m_context, m_cmdQueue, vertices.data(), vSize);
+    if (vSize > m_vbo[f].getSize()) {
+        VkDeviceSize newSize = std::max(vSize * 2, static_cast<VkDeviceSize>(MAX_MENU_VBO_SIZE));
+        m_vbo[f] = Buffer(m_context, newSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    }
+    if (iSize > m_ibo[f].getSize()) {
+        VkDeviceSize newSize = std::max(iSize * 2, static_cast<VkDeviceSize>(MAX_MENU_IBO_SIZE));
+        m_ibo[f] = Buffer(m_context, newSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    }
 
-    m_ibo[f] = Buffer(m_context, iSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE);
-    m_ibo[f].uploadStaged(m_context, m_cmdQueue, indices.data(), iSize);
+    m_vbo[f].upload(vertices.data(), vSize);
+    m_ibo[f].upload(indices.data(), iSize);
 
     m_lastState = state;
     m_lastW = screenWidth;

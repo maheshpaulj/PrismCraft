@@ -14,6 +14,10 @@ layout(push_constant) uniform PushConstants {
     vec4 pointLight1;
     vec4 pointLight2;
     vec4 heldTorch;
+    vec4 shaderOptions;
+    vec4 dayInfo;
+    vec4 pointLight3;
+    vec4 pointLight4;
 } pc;
 
 layout(location = 0) out vec2 fragTexCoord;

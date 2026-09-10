@@ -170,7 +170,21 @@ void VulkanContext::createLogicalDevice() {
         queueCreateInfos.push_back(queueCreateInfo);
     }
 
+    VkPhysicalDeviceFeatures supportedFeatures{};
+    vkGetPhysicalDeviceFeatures(m_physicalDevice, &supportedFeatures);
+
+    VkPhysicalDeviceProperties properties{};
+    vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
+
     VkPhysicalDeviceFeatures deviceFeatures{};
+    if (supportedFeatures.samplerAnisotropy) {
+        deviceFeatures.samplerAnisotropy = VK_TRUE;
+        m_samplerAnisotropySupported = true;
+        m_maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+    } else {
+        m_samplerAnisotropySupported = false;
+        m_maxAnisotropy = 1.0f;
+    }
 
     VkPhysicalDeviceVulkan13Features vulkan13Features{};
     vulkan13Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;

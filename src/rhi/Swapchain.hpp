@@ -31,6 +31,7 @@ public:
     uint32_t acquireNextImage(VkSemaphore imageAvailableSemaphore);
 
     // Transition helpers for dynamic rendering
+    void transitionDepthAttachment(VkCommandBuffer cmd);
     void transitionToColorAttachment(VkCommandBuffer cmd, uint32_t imageIndex);
     void transitionToPresent(VkCommandBuffer cmd, uint32_t imageIndex);
 

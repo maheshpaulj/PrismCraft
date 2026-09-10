@@ -10,25 +10,22 @@ layout(push_constant) uniform PushConstants {
     vec4 sunDir;     // xyz = normalized sun dir, w = sun intensity
     vec4 skyFog;     // xyz = fog color, w = fog distance
     vec4 camPos;     // xyz = camera pos, w = time
-    vec4 lightColor; // xyz = player pos, w = packed
+    vec4 lightColor;
     vec4 pointLight1;
     vec4 pointLight2;
     vec4 heldTorch;
     vec4 shaderOptions;
-    vec4 dayInfo;
+    vec4 dayInfo;    // x = dayFactor, y = sunHeight, z = exposure, w = fogDensity
     vec4 pointLight3;
     vec4 pointLight4;
 } pc;
 
-layout(location = 0) out vec2 fragTexCoord;
-layout(location = 1) out vec3 fragNormal;
-layout(location = 2) out vec3 fragColor;
-layout(location = 3) out vec3 fragWorldPos;
+layout(location = 0) out vec3 fragViewDir;
 
 void main() {
-    gl_Position = pc.mvp * vec4(inPosition, 1.0);
-    fragTexCoord = inTexCoord;
-    fragNormal = inNormal;
-    fragColor = inColor;
-    fragWorldPos = inPosition;
+    fragViewDir = normalize(inPosition);
+    vec3 worldPos = pc.camPos.xyz + inPosition;
+    vec4 clipPos = pc.mvp * vec4(worldPos, 1.0);
+    // Project directly to the far plane z = w (depth = 1.0 in Vulkan)
+    gl_Position = clipPos.xyww;
 }

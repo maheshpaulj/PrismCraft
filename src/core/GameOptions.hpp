@@ -31,8 +31,14 @@ struct GameOptions {
     int atmosphericFog = 1;        // 0: Off, 1: Subtle, 2: Dense
     bool torchColorBleed = true;   // Colored torchlight falloff & tinting
     bool smoothLighting = true;    // Smooth vertex AO lighting
+    float aoStrength = 1.0f;       // Ambient occlusion intensity multiplier (0.0: Off, 1.0: Subtle Realistic, 1.4: Enhanced)
     bool lightOverlay = false;     // F7 toggle
     bool debugHUD = false;         // F3 toggle
+    float exposure = 0.95f;        // Physical camera exposure scale
+    float fogDensity = 1.0f;       // Atmospheric optical depth multiplier
+    float fogHeight = 62.0f;       // Base altitude of low-altitude ground haze
+    float fogStartDist = 12.0f;    // Near distance threshold where atmospheric perspective begins
+    float scatteringStrength = 1.0f; // Multiplier on forward solar Mie scattering
 };
 
 } // namespace prismcraft

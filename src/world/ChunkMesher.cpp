@@ -217,84 +217,94 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
     };
 
     // -------------------------------------------------------------
-    // Minecraft Smooth Lighting: Per-Vertex Ambient Occlusion
+    // Geometry-Aware Voxel Contact Ambient Occlusion
+    // Tailored for Equilateral Triangular Prism Honeycomb
     // -------------------------------------------------------------
-    // 1. Top face vertex AO: probes 6 directions in the horizontal plane around the corner
+    auto getOcclusionWeight = [&](const Cell& c) -> float {
+        if (c.type == BlockType::Air || c.type == BlockType::Water) return 0.0f;
+        if (c.isOpaque()) return 1.0f;
+        if (c.type == BlockType::Leaves) return 0.70f; // Leaves cast soft, believable canopy & foliage occlusion
+        if (c.isSolid()) return 0.80f; // Glass, Ice, etc.
+        if (c.isFoliage()) return 0.20f; // Contact touch from tall grass, flowers
+        return 0.0f;
+    };
+
+    // Equilateral triangle sector bisectors around ANY vertex in the triangular lattice.
+    // 6 triangles meet at 60-degree increments: 30, 90, 150, 210, 270, 330 deg.
+    static const float triSectorAngles[6][2] = {
+        {  0.8660254f,  0.5000000f }, // 30 deg
+        {  0.0000000f,  1.0000000f }, // 90 deg
+        { -0.8660254f,  0.5000000f }, // 150 deg
+        { -0.8660254f, -0.5000000f }, // 210 deg
+        {  0.0000000f, -1.0000000f }, // 270 deg
+        {  0.8660254f, -0.5000000f }  // 330 deg
+    };
+
+    // 1. Top face vertex AO: probes the 6 horizontal triangular prism sectors meeting at vertex V in layer y+1
     auto getTopVertexAO = [&](const glm::vec3& V, int y) -> float {
-        int occluded = 0;
-        static const float cosSin6[6][2] = {
-            { 1.0f, 0.0f },
-            { 0.5f, 0.8660254f },
-            { -0.5f, 0.8660254f },
-            { -1.0f, 0.0f },
-            { -0.5f, -0.8660254f },
-            { 0.5f, -0.8660254f }
-        };
+        float occScore = 0.0f;
         for (int i = 0; i < 6; ++i) {
-            glm::vec3 probePos(V.x + cosSin6[i][0] * 0.35f, static_cast<float>(y) + 1.25f, V.z + cosSin6[i][1] * 0.35f);
+            glm::vec3 probePos(V.x + triSectorAngles[i][0] * 0.38f, static_cast<float>(y) + 1.25f, V.z + triSectorAngles[i][1] * 0.38f);
             CellCoord sc = worldToCell(probePos);
             Cell scell = getCellAtWorld(sc.x, sc.y, sc.z, sc.s);
-            if (scell.isOpaque() && scell.type != BlockType::Leaves) {
-                occluded++;
-            }
+            occScore += getOcclusionWeight(scell);
         }
-        if (occluded == 0) return 1.00f;
-        if (occluded == 1) return 0.82f;
-        if (occluded == 2) return 0.65f;
-        if (occluded == 3) return 0.52f;
-        return 0.42f;
+        // Vertical overhang / leaf canopy check (1 block higher)
+        glm::vec3 aboveProbe(V.x, static_cast<float>(y) + 2.25f, V.z);
+        CellCoord scAbove = worldToCell(aboveProbe);
+        Cell scellAbove = getCellAtWorld(scAbove.x, scAbove.y, scAbove.z, scAbove.s);
+        occScore += getOcclusionWeight(scellAbove) * 0.35f;
+
+        if (occScore <= 0.05f) return 1.00f;
+        // Subtle, non-crushing curve: 0 occluders = 1.0, 1 = 0.87, 2 = 0.74, 3 = 0.61, 4+ = 0.48
+        float ao = 1.0f - std::min(occScore, 4.0f) * 0.13f;
+        return std::clamp(ao, 0.48f, 1.0f);
     };
 
-    // 2. Bottom face vertex AO: probes below ceiling
+    // 2. Bottom face vertex AO: probes the 6 horizontal triangular prism sectors meeting at vertex V in layer y-1
     auto getBotVertexAO = [&](const glm::vec3& V, int y) -> float {
-        int occluded = 0;
-        static const float cosSin6[6][2] = {
-            { 1.0f, 0.0f },
-            { 0.5f, 0.8660254f },
-            { -0.5f, 0.8660254f },
-            { -1.0f, 0.0f },
-            { -0.5f, -0.8660254f },
-            { 0.5f, -0.8660254f }
-        };
+        float occScore = 0.0f;
         for (int i = 0; i < 6; ++i) {
-            glm::vec3 probePos(V.x + cosSin6[i][0] * 0.35f, static_cast<float>(y) - 0.25f, V.z + cosSin6[i][1] * 0.35f);
+            glm::vec3 probePos(V.x + triSectorAngles[i][0] * 0.38f, static_cast<float>(y) - 0.25f, V.z + triSectorAngles[i][1] * 0.38f);
             CellCoord sc = worldToCell(probePos);
             Cell scell = getCellAtWorld(sc.x, sc.y, sc.z, sc.s);
-            if (scell.isOpaque() && scell.type != BlockType::Leaves) {
-                occluded++;
-            }
+            occScore += getOcclusionWeight(scell);
         }
-        if (occluded == 0) return 1.00f;
-        if (occluded == 1) return 0.82f;
-        if (occluded == 2) return 0.65f;
-        if (occluded == 3) return 0.52f;
-        return 0.42f;
+        glm::vec3 belowProbe(V.x, static_cast<float>(y) - 1.25f, V.z);
+        CellCoord scBelow = worldToCell(belowProbe);
+        Cell scellBelow = getCellAtWorld(scBelow.x, scBelow.y, scBelow.z, scBelow.s);
+        occScore += getOcclusionWeight(scellBelow) * 0.35f;
+
+        if (occScore <= 0.05f) return 1.00f;
+        float ao = 1.0f - std::min(occScore, 4.0f) * 0.13f;
+        return std::clamp(ao, 0.48f, 1.0f);
     };
 
-    // 3. Wall quad vertex AO: probes floor/ceiling contact and lateral corner seams
+    // 3. Wall quad vertex AO: probes floor/ceiling contact, lateral corner seams, and diagonal crevice pockets
     auto getWallVertexAO = [&](const glm::vec3& V, const glm::vec3& wallNorm, const glm::vec3& tang, bool isBottom, float lateralSign) -> float {
-        glm::vec3 Pout = V + wallNorm * 0.08f;
-        int occluded = 0;
+        glm::vec3 Pout = V + wallNorm * 0.12f;
 
-        // Test vertical contact (floor or ceiling)
-        glm::vec3 vertProbe = Pout + glm::vec3(0.0f, isBottom ? -0.4f : 0.4f, 0.0f);
+        // Test vertical contact (floor at y-1 or overhang ceiling at y+1)
+        glm::vec3 vertProbe = Pout + glm::vec3(0.0f, isBottom ? -0.35f : 0.35f, 0.0f);
         Cell scVert = getCellAtWorld(worldToCell(vertProbe).x, worldToCell(vertProbe).y, worldToCell(vertProbe).z, worldToCell(vertProbe).s);
-        if (scVert.isOpaque() && scVert.type != BlockType::Leaves) occluded++;
+        float wVert = getOcclusionWeight(scVert);
 
-        // Test lateral corner seam
-        glm::vec3 latProbe = Pout + tang * (lateralSign * 0.38f);
+        // Test lateral corner seam (adjacent block forming an inner corner)
+        glm::vec3 latProbe = Pout + tang * (lateralSign * 0.30f);
         Cell scLat = getCellAtWorld(worldToCell(latProbe).x, worldToCell(latProbe).y, worldToCell(latProbe).z, worldToCell(latProbe).s);
-        if (scLat.isOpaque() && scLat.type != BlockType::Leaves) occluded++;
+        float wLat = getOcclusionWeight(scLat);
 
-        // Test diagonal corner
-        glm::vec3 diagProbe = Pout + tang * (lateralSign * 0.38f) + glm::vec3(0.0f, isBottom ? -0.4f : 0.4f, 0.0f);
+        // Test diagonal corner pocket (meeting point of floor/ceiling and lateral wall)
+        glm::vec3 diagProbe = Pout + tang * (lateralSign * 0.30f) + glm::vec3(0.0f, isBottom ? -0.35f : 0.35f, 0.0f);
         Cell scDiag = getCellAtWorld(worldToCell(diagProbe).x, worldToCell(diagProbe).y, worldToCell(diagProbe).z, worldToCell(diagProbe).s);
-        if (scDiag.isOpaque() && scDiag.type != BlockType::Leaves) occluded++;
+        float wDiag = getOcclusionWeight(scDiag);
 
-        if (occluded == 0) return 1.00f;
-        if (occluded == 1) return 0.78f;
-        if (occluded == 2) return 0.58f;
-        return 0.42f;
+        float occScore = wVert * 1.0f + wLat * 1.0f + wDiag * 0.65f;
+        if (occScore <= 0.02f) return 1.00f;
+
+        // Smooth subtle falloff: floor contact = ~0.84, inner corner = ~0.68, 3-way pocket = ~0.56
+        float ao = 1.0f - std::min(occScore, 3.2f) * 0.16f;
+        return std::clamp(ao, 0.48f, 1.0f);
     };
 
     auto shouldDrawFace = [&](Cell c, Cell n) -> bool {
@@ -322,23 +332,24 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                         float fh = cell.isTorch() ? 0.62f : 0.85f;
                         float sunlight = getSunlightFactor(x, y, z);
                         float torchL = getTorchLight(center);
-                        glm::vec3 folColor = cell.isTorch() ? glm::vec3(1.0f, 1.0f, 1.0f) : glm::vec3(sunlight, 1.0f, torchL);
+                        glm::vec3 folColorBot = cell.isTorch() ? glm::vec3(1.0f, 1.0f, 1.0f) : glm::vec3(sunlight, 0.72f, torchL);
+                        glm::vec3 folColorTop = cell.isTorch() ? glm::vec3(1.0f, 1.0f, 1.0f) : glm::vec3(sunlight, 1.0f, torchL);
 
                         // Diagonal quad 1 (Double sided)
                         addOpaqueQuad(center + glm::vec3(-hw, 0.0f, -hw), center + glm::vec3(-hw, fh, -hw),
                                       center + glm::vec3(hw, fh, hw), center + glm::vec3(hw, 0.0f, hw),
-                                      uv, nTop, folColor, folColor, folColor, folColor);
+                                      uv, nTop, folColorBot, folColorTop, folColorTop, folColorBot);
                         addOpaqueQuad(center + glm::vec3(hw, 0.0f, hw), center + glm::vec3(hw, fh, hw),
                                       center + glm::vec3(-hw, fh, -hw), center + glm::vec3(-hw, 0.0f, -hw),
-                                      uv, nTop, folColor, folColor, folColor, folColor);
+                                      uv, nTop, folColorBot, folColorTop, folColorTop, folColorBot);
 
                         // Diagonal quad 2 (Double sided)
                         addOpaqueQuad(center + glm::vec3(-hw, 0.0f, hw), center + glm::vec3(-hw, fh, hw),
                                       center + glm::vec3(hw, fh, -hw), center + glm::vec3(hw, 0.0f, -hw),
-                                      uv, nTop, folColor, folColor, folColor, folColor);
+                                      uv, nTop, folColorBot, folColorTop, folColorTop, folColorBot);
                         addOpaqueQuad(center + glm::vec3(hw, 0.0f, -hw), center + glm::vec3(hw, fh, -hw),
                                       center + glm::vec3(-hw, fh, hw), center + glm::vec3(-hw, 0.0f, hw),
-                                      uv, nTop, folColor, folColor, folColor, folColor);
+                                      uv, nTop, folColorBot, folColorTop, folColorTop, folColorBot);
                         continue;
                     }
 
@@ -454,9 +465,9 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                             float ao1 = getBotVertexAO(B1, y);
                             float ao2 = getBotVertexAO(B2, y);
 
-                            glm::vec3 c0(sun0, 0.55f * ao0, isSubmerged ? (t0 + 2.0f) : t0);
-                            glm::vec3 c1(sun1, 0.55f * ao1, isSubmerged ? (t1 + 2.0f) : t1);
-                            glm::vec3 c2(sun2, 0.55f * ao2, isSubmerged ? (t2 + 2.0f) : t2);
+                            glm::vec3 c0(sun0, ao0, isSubmerged ? (t0 + 2.0f) : t0);
+                            glm::vec3 c1(sun1, ao1, isSubmerged ? (t1 + 2.0f) : t1);
+                            glm::vec3 c2(sun2, ao2, isSubmerged ? (t2 + 2.0f) : t2);
 
                             addOpaqueTri(B0, B1, B2, uvB0, uvB1, uvB2, nBot, c0, c1, c2);
                         }
@@ -490,12 +501,6 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                             addWaterQuad(vB0, vT0, vT1, vB1, uv, wallNorm, wc_B0, wc_T0, wc_T1, wc_B1);
                         } else {
                             bool isSubmerged = (neighborCell.type == BlockType::Water);
-
-                            // Minecraft directional shading multiplier based on face normal:
-                            // Base Wall (|Nx| < 0.2): 0.80f, Left Slanted (Nx < -0.2): 0.65f, Right Slanted (Nx > 0.2): 0.72f
-                            float faceDir = 0.80f;
-                            if (wallNorm.x < -0.2f) faceDir = 0.65f;
-                            else if (wallNorm.x > 0.2f) faceDir = 0.72f;
                             glm::vec3 tang = glm::normalize(vB1 - vB0);
 
                             float ao_B0 = getWallVertexAO(vB0, wallNorm, tang, true, -1.0f);
@@ -503,10 +508,10 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                             float ao_T1 = getWallVertexAO(vT1, wallNorm, tang, false, 1.0f);
                             float ao_B1 = getWallVertexAO(vB1, wallNorm, tang, true, 1.0f);
 
-                            glm::vec3 c_B0(sun_B0, faceDir * ao_B0, isSubmerged ? (t_B0 + 2.0f) : t_B0);
-                            glm::vec3 c_T0(sun_T0, faceDir * ao_T0, isSubmerged ? (t_T0 + 2.0f) : t_T0);
-                            glm::vec3 c_T1(sun_T1, faceDir * ao_T1, isSubmerged ? (t_T1 + 2.0f) : t_T1);
-                            glm::vec3 c_B1(sun_B1, faceDir * ao_B1, isSubmerged ? (t_B1 + 2.0f) : t_B1);
+                            glm::vec3 c_B0(sun_B0, ao_B0, isSubmerged ? (t_B0 + 2.0f) : t_B0);
+                            glm::vec3 c_T0(sun_T0, ao_T0, isSubmerged ? (t_T0 + 2.0f) : t_T0);
+                            glm::vec3 c_T1(sun_T1, ao_T1, isSubmerged ? (t_T1 + 2.0f) : t_T1);
+                            glm::vec3 c_B1(sun_B1, ao_B1, isSubmerged ? (t_B1 + 2.0f) : t_B1);
 
                             addOpaqueQuad(vB0, vT0, vT1, vB1, uv, wallNorm, c_B0, c_T0, c_T1, c_B1);
                         }
@@ -677,28 +682,28 @@ ChunkMesh ChunkMesher::generateLODMesh(const Chunk& chunk, LODLevel lod) {
                     glm::vec3 vT0(x0, py + 1.0f, z0);
                     glm::vec3 vT1(x1, py + 1.0f, z0);
                     glm::vec3 vB1(x1, py + 1.0f - skirtDepth, z0);
-                    addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
+                    addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(1.0f, 1.0f, 0.0f));
                 }
                 if (lz + step >= CHUNK_SIZE_Z) {
                     glm::vec3 vB0(x1, py + 1.0f - skirtDepth, z1);
                     glm::vec3 vT0(x1, py + 1.0f, z1);
                     glm::vec3 vT1(x0, py + 1.0f, z1);
                     glm::vec3 vB1(x0, py + 1.0f - skirtDepth, z1);
-                    addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
+                    addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(1.0f, 1.0f, 0.0f));
                 }
                 if (lx == 0) {
                     glm::vec3 vB0(x0, py + 1.0f - skirtDepth, z1);
                     glm::vec3 vT0(x0, py + 1.0f, z1);
                     glm::vec3 vT1(x0, py + 1.0f, z0);
                     glm::vec3 vB1(x0, py + 1.0f - skirtDepth, z0);
-                    addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.65f, 0.0f));
+                    addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f));
                 }
                 if (lx + step >= CHUNK_SIZE_X) {
                     glm::vec3 vB0(x1, py + 1.0f - skirtDepth, z0);
                     glm::vec3 vT0(x1, py + 1.0f, z0);
                     glm::vec3 vT1(x1, py + 1.0f, z1);
                     glm::vec3 vB1(x1, py + 1.0f - skirtDepth, z1);
-                    addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.72f, 0.0f));
+                    addOpaqueQuad(vB0, vT0, vT1, vB1, sideUV, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 1.0f, 0.0f));
                 }
             }
         }

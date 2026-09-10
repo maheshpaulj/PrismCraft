@@ -60,8 +60,13 @@ bool ConfigManager::load(GameOptions& options, const std::string& filePath) {
             else if (key == "atmosphericFog") options.atmosphericFog = std::clamp(std::stoi(val), 0, 2);
             else if (key == "torchColorBleed") options.torchColorBleed = (val == "1" || val == "true" || val == "True");
             else if (key == "smoothLighting") options.smoothLighting = (val == "1" || val == "true" || val == "True");
+            else if (key == "aoStrength") options.aoStrength = std::clamp(std::stof(val), 0.0f, 3.0f);
             else if (key == "lightOverlay") options.lightOverlay = (val == "1" || val == "true" || val == "True");
-            else if (key == "debugHUD") options.debugHUD = (val == "1" || val == "true" || val == "True");
+            else if (key == "exposure") options.exposure = std::clamp(std::stof(val), 0.2f, 3.0f);
+            else if (key == "fogDensity") options.fogDensity = std::clamp(std::stof(val), 0.1f, 5.0f);
+            else if (key == "fogHeight") options.fogHeight = std::clamp(std::stof(val), 20.0f, 160.0f);
+            else if (key == "fogStartDist") options.fogStartDist = std::clamp(std::stof(val), 0.0f, 100.0f);
+            else if (key == "scatteringStrength") options.scatteringStrength = std::clamp(std::stof(val), 0.0f, 4.0f);
         } catch (...) {
             // Ignore malformed line
         }
@@ -108,8 +113,14 @@ bool ConfigManager::save(const GameOptions& options, const std::string& filePath
     file << "atmosphericFog=" << options.atmosphericFog << "\n";
     file << "torchColorBleed=" << (options.torchColorBleed ? 1 : 0) << "\n";
     file << "smoothLighting=" << (options.smoothLighting ? 1 : 0) << "\n";
+    file << "aoStrength=" << options.aoStrength << "\n";
     file << "lightOverlay=" << (options.lightOverlay ? 1 : 0) << "\n";
     file << "debugHUD=" << (options.debugHUD ? 1 : 0) << "\n";
+    file << "exposure=" << options.exposure << "\n";
+    file << "fogDensity=" << options.fogDensity << "\n";
+    file << "fogHeight=" << options.fogHeight << "\n";
+    file << "fogStartDist=" << options.fogStartDist << "\n";
+    file << "scatteringStrength=" << options.scatteringStrength << "\n";
 
     std::cout << "[Config] Saved options to " << filePath << std::endl;
     return true;
