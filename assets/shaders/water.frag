@@ -13,6 +13,8 @@ layout(std140, binding = 2) uniform ShadowUBO {
     vec4 cascadeSplits; // x = split0, y = split1
 } shadowUBO;
 
+layout(binding = 3) uniform sampler2D ssrSampler;
+
 layout(push_constant) uniform PushConstants {
     mat4 mvp;
     vec4 sunDir;     // xyz = normalized sun dir, w = sun intensity (positive = vibrant visuals ON, negative = OFF)
@@ -168,26 +170,26 @@ float sampleCloudShadow(vec3 worldPos, vec3 L) {
 
 
 // -------------------------------------------------------------
-// Real-Time High-Fidelity Scene Reflection (Sky, Clouds & Shorelines)
+// Real-Time Physically-Based Screen-Space Reflection (SSR) & Sky
 // -------------------------------------------------------------
-vec3 traceSceneReflection(vec3 origin, vec3 R, vec3 L, float isDay, float sunIntensity, int waterQuality, float dither) {
+vec3 traceSSR(vec3 origin, vec3 R, vec3 L, float isDay, float sunIntensity, int waterQuality, float dither) {
     float goldenHour = smoothstep(0.55, 0.08, L.y) * step(0.0, L.y);
 
     // 1. Physically-Based Atmospheric Sky Dome Gradient (matching sky.frag)
     vec3 skyZenith  = mix(vec3(0.015, 0.035, 0.10), vec3(0.18, 0.42, 0.82), isDay);
     vec3 horizonDay = mix(vec3(0.58, 0.72, 0.88), vec3(1.35, 0.95, 0.52), goldenHour * 0.75);
     vec3 skyHorizon = mix(srgbToLinear(pc.skyFog.rgb), horizonDay, isDay);
-    vec3 skyColor   = mix(skyHorizon, skyZenith, clamp(max(R.y, 0.0) * 1.6, 0.0, 1.0));
+    vec3 proceduralSky = mix(skyHorizon, skyZenith, clamp(max(R.y, 0.0) * 1.6, 0.0, 1.0));
 
     // Solar atmospheric forward glare reflected in sky
     float cosSun = dot(R, L);
     if (cosSun > 0.0 && isDay > 0.05) {
         float sunReflectionGlare = pow(cosSun, 28.0) * 2.2 * sunIntensity;
         vec3 sunGlareColor = mix(vec3(1.15, 1.08, 0.95), vec3(1.85, 1.30, 0.65), goldenHour);
-        skyColor += sunGlareColor * sunReflectionGlare;
+        proceduralSky += sunGlareColor * sunReflectionGlare;
     }
 
-    // 2. Reflected 3D Volumetric Cumulus Clouds in the sky
+    // Reflected 3D Volumetric Cumulus Clouds in the sky dome
     if (R.y > 0.012 && waterQuality >= 1) {
         float tCloud = (195.0 - origin.y) / max(R.y, 0.02);
         if (tCloud > 0.0 && tCloud < 7000.0) {
@@ -207,56 +209,82 @@ vec3 traceSceneReflection(vec3 origin, vec3 R, vec3 L, float isDay, float sunInt
                         float silver = pow(max(cosSun * 0.5 + 0.5, 0.0), 3.0) * 0.65 + 0.85;
                         vec3 goldenCloud = mix(vec3(1.40, 1.30, 1.15), vec3(2.20, 1.45, 0.70), goldenHour);
                         vec3 cloudLit = mix(vec3(0.30, 0.38, 0.50), goldenCloud * silver, isDay);
-                        skyColor = mix(skyColor, cloudLit, cAlpha * 0.88);
+                        proceduralSky = mix(proceduralSky, cloudLit, cAlpha * 0.88);
                     }
                 }
             }
         }
     }
 
-    // 3. Shoreline, Island Hills & Forest Silhouette Reflection (matching reference image)
-    vec3 terrainReflection = vec3(0.0);
-    float terrainWeight = 0.0;
+    vec3 reflectedColor = proceduralSky;
+    bool hitIsland = false;
 
-    if (R.y < 0.35 && waterQuality >= 1) {
-        float dist = 1.0 + dither * 0.8;
-        int maxSteps = (waterQuality >= 2) ? 45 : 28;
-        float maxDist = (waterQuality >= 2) ? 750.0 : 450.0;
+    // 2. High-Precision 3D Raymarch to intersect with above-water island terrain
+    if (waterQuality >= 1) {
+        // Ensure reflection ray points above the water plane (water level ~44.0)
+        vec3 safeR = R;
+        if (safeR.y < 0.006) safeR = normalize(vec3(safeR.x, 0.006, safeR.z));
+
+        float dist = 0.8 + dither * 0.6;
+        int maxSteps = (waterQuality >= 2) ? 38 : 24;
+        float maxDist = (waterQuality >= 2) ? 500.0 : 300.0;
 
         for (int i = 0; i < maxSteps; ++i) {
             if (dist >= maxDist) break;
-            vec3 P = origin + R * dist;
+            vec3 P = origin + safeR * dist;
 
-            float groundH = getTerrainHeight(P.xz);
-            float canopyH = (groundH > 50.0) ? (groundH + 4.5) : groundH;
+            // Only test above-water terrain (P.y >= 43.6).
+            // This strictly eliminates any false hits on the underwater seabed!
+            if (P.y >= 43.6) {
+                float groundH = getTerrainHeight(P.xz);
+                float canopyH = (groundH > 50.0) ? (groundH + 4.8) : groundH;
 
-            if (P.y <= canopyH) {
-                bool hitCanopy = (P.y > groundH + 0.8);
-                vec3 foliageColor = vec3(0.05, 0.22, 0.06) * mix(0.70, 1.25, goldenHour);
-                vec3 shoreColor   = vec3(0.42, 0.36, 0.22) * mix(0.65, 1.15, goldenHour);
+                if (P.y <= canopyH) {
+                    // Ray hit the above-water island terrain or tree canopy!
+                    // Project 3D hit point into screen space coordinates
+                    vec4 clip = pc.mvp * vec4(P, 1.0);
+                    if (clip.w > 0.0) {
+                        vec2 uv = (clip.xy / clip.w) * 0.5 + 0.5;
+                        if (uv.x >= 0.001 && uv.x <= 0.999 && uv.y >= 0.001 && uv.y <= 0.999) {
+                            // Sample the actual rendered island (trees, grass, stone, sand) from the screen texture!
+                            vec3 islandCol = texture(ssrSampler, uv).rgb;
+                            vec2 edgeDist = min(uv, 1.0 - uv);
+                            float edgeFade = smoothstep(0.0, 0.06, min(edgeDist.x, edgeDist.y));
+                            float distFade = 1.0 - smoothstep(maxDist * 0.60, maxDist, dist);
 
-                if (groundH > 82.0) {
-                    foliageColor = vec3(0.85, 0.90, 0.95); // Snow
-                } else if (groundH > 66.0) {
-                    foliageColor = vec3(0.28, 0.27, 0.26); // Granite
+                            reflectedColor = mix(proceduralSky, islandCol, edgeFade * distFade);
+                            hitIsland = true;
+                            break;
+                        }
+                    }
                 }
-
-                vec3 hitColor = hitCanopy ? foliageColor : shoreColor;
-                float sunDiffuse = clamp(dot(vec3(-R.x, 0.5, -R.z), L), 0.25, 1.0);
-                hitColor *= mix(0.40, 1.25, sunDiffuse * isDay);
-
-                float distFade = clamp(dist / maxDist, 0.0, 1.0);
-                terrainReflection = mix(hitColor, skyHorizon, distFade * 0.60);
-                terrainWeight = clamp(1.0 - distFade * 0.40, 0.0, 0.95);
-                break;
             }
 
-            float stepSize = 1.0 + 0.08 * dist;
+            // Exponential step scaling for rapid, efficient distance traversal
+            float stepSize = 0.8 + 0.085 * dist;
             dist += stepSize;
         }
     }
 
-    return mix(skyColor, terrainReflection, terrainWeight * max(isDay, 0.40));
+    // 3. Screen-Space Reflection of Sky and Clouds (when ray doesn't hit island)
+    if (!hitIsland) {
+        vec3 safeR = R;
+        if (safeR.y < 0.005) safeR = normalize(vec3(safeR.x, 0.005, safeR.z));
+        vec3 skyTarget = origin + safeR * 250.0;
+        vec4 skyClip = pc.mvp * vec4(skyTarget, 1.0);
+        if (skyClip.w > 0.0) {
+            vec2 skyUV = (skyClip.xy / skyClip.w) * 0.5 + 0.5;
+            if (skyUV.x >= 0.001 && skyUV.x <= 0.999 && skyUV.y >= 0.001 && skyUV.y <= 0.999) {
+                // Sample rendered clouds and sky from the screen
+                vec3 screenSky = texture(ssrSampler, skyUV).rgb;
+                vec2 edgeDist = min(skyUV, 1.0 - skyUV);
+                float edgeFade = smoothstep(0.0, 0.08, min(edgeDist.x, edgeDist.y));
+                reflectedColor = mix(proceduralSky, screenSky, edgeFade * 0.90);
+            }
+        }
+    }
+
+    return reflectedColor;
 }
 
 // -------------------------------------------------------------
@@ -477,9 +505,9 @@ void main() {
         const float F0 = 0.020;
         float fresnel = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
 
-        // Trace scene reflection (sky dome, cumulus clouds, island shore trees)
+        // Trace screen-space reflection (island trees, terrain, sky, and clouds)
         vec3 R = reflect(-V, effN);
-        vec3 reflectedScene = traceSceneReflection(fragWorldPos, R, L, isDay, sunIntensity, optWaterQuality, dither);
+        vec3 reflectedScene = traceSSR(fragWorldPos, R, L, isDay, sunIntensity, optWaterQuality, dither);
 
         // GGX Microfacet Specular Sun Reflection (Glittering Sun Trail)
         vec3 H = normalize(L + V);

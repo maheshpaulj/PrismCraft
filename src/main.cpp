@@ -353,6 +353,111 @@ void run() {
         vkUpdateDescriptorSets(context.getDevice(), 3, writes, 0, nullptr);
     }
 
+    // -------------------------------------------------------------
+    // Water Descriptor Set Layout (Binding 0=Atlas, 1=ShadowMap, 2=ShadowUBO, 3=SSRTexture)
+    // -------------------------------------------------------------
+    VkDescriptorSetLayoutBinding waterBindings[4]{};
+    waterBindings[0] = sceneBindings[0];
+    waterBindings[1] = sceneBindings[1];
+    waterBindings[2] = sceneBindings[2];
+    waterBindings[3].binding = 3;
+    waterBindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    waterBindings[3].descriptorCount = 1;
+    waterBindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo waterLayoutInfo{};
+    waterLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    waterLayoutInfo.bindingCount = 4;
+    waterLayoutInfo.pBindings = waterBindings;
+
+    VkDescriptorSetLayout waterDescLayout = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorSetLayout(context.getDevice(), &waterLayoutInfo, nullptr, &waterDescLayout),
+             "Failed to create water descriptor set layout!");
+
+    VkDescriptorPoolSize waterPoolSizes[2]{};
+    waterPoolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    waterPoolSizes[0].descriptorCount = 3 * MAX_FRAMES_IN_FLIGHT;
+    waterPoolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    waterPoolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT;
+
+    VkDescriptorPoolCreateInfo waterPoolInfo{};
+    waterPoolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    waterPoolInfo.poolSizeCount = 2;
+    waterPoolInfo.pPoolSizes = waterPoolSizes;
+    waterPoolInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
+
+    VkDescriptorPool waterDescPool = VK_NULL_HANDLE;
+    VK_CHECK(vkCreateDescriptorPool(context.getDevice(), &waterPoolInfo, nullptr, &waterDescPool),
+             "Failed to create water descriptor pool!");
+
+    std::vector<VkDescriptorSetLayout> waterLayouts(MAX_FRAMES_IN_FLIGHT, waterDescLayout);
+    VkDescriptorSetAllocateInfo waterAllocInfo{};
+    waterAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    waterAllocInfo.descriptorPool = waterDescPool;
+    waterAllocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+    waterAllocInfo.pSetLayouts = waterLayouts.data();
+
+    VkDescriptorSet waterDescSets[MAX_FRAMES_IN_FLIGHT]{};
+    VK_CHECK(vkAllocateDescriptorSets(context.getDevice(), &waterAllocInfo, waterDescSets),
+             "Failed to allocate water descriptor sets!");
+
+    auto updateWaterDescriptorSets = [&]() {
+        for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+            VkDescriptorImageInfo atlasImageInfo{};
+            atlasImageInfo.sampler = textureAtlas.getSampler();
+            atlasImageInfo.imageView = textureAtlas.getImageView();
+            atlasImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            VkDescriptorImageInfo shadowImageInfo{};
+            shadowImageInfo.sampler = shadowMap.getSampler();
+            shadowImageInfo.imageView = shadowMap.getArrayImageView();
+            shadowImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            VkDescriptorBufferInfo uboInfo{};
+            uboInfo.buffer = shadowUboBuffers[i].getBuffer();
+            uboInfo.offset = 0;
+            uboInfo.range = sizeof(ShadowUBO);
+
+            VkDescriptorImageInfo ssrImageInfo{};
+            ssrImageInfo.sampler = postProcessRenderer.getSSRSampler();
+            ssrImageInfo.imageView = postProcessRenderer.getSSRImageView();
+            ssrImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            VkWriteDescriptorSet writes[4]{};
+            writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[0].dstSet = waterDescSets[i];
+            writes[0].dstBinding = 0;
+            writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[0].descriptorCount = 1;
+            writes[0].pImageInfo = &atlasImageInfo;
+
+            writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[1].dstSet = waterDescSets[i];
+            writes[1].dstBinding = 1;
+            writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[1].descriptorCount = 1;
+            writes[1].pImageInfo = &shadowImageInfo;
+
+            writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[2].dstSet = waterDescSets[i];
+            writes[2].dstBinding = 2;
+            writes[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            writes[2].descriptorCount = 1;
+            writes[2].pBufferInfo = &uboInfo;
+
+            writes[3].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[3].dstSet = waterDescSets[i];
+            writes[3].dstBinding = 3;
+            writes[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[3].descriptorCount = 1;
+            writes[3].pImageInfo = &ssrImageInfo;
+
+            vkUpdateDescriptorSets(context.getDevice(), 4, writes, 0, nullptr);
+        }
+    };
+
+    updateWaterDescriptorSets();
+
     // 3D Directional CSM Shadow Pipeline (Depth only, No color attachments, Double-sided for foliage shadow cutout)
     Pipeline csmPipeline(context, {}, shadowMap.getFormat(),
                          exeDir + "assets/shaders/csm_depth.vert.spv",
@@ -368,7 +473,7 @@ void run() {
     // 3D Translucent Water Pipeline (Double-sided, Depth test ON, Depth write OFF, Alpha Blending ON)
     Pipeline waterPipeline(context, postProcessRenderer.getHDRFormat(), swapchain.getDepthFormat(),
                            exeDir + "assets/shaders/cell.vert.spv", exeDir + "assets/shaders/water.frag.spv",
-                           sceneDescLayout, true, false, BlendMode::Alpha, VK_CULL_MODE_NONE);
+                           waterDescLayout, true, false, BlendMode::Alpha, VK_CULL_MODE_NONE);
 
     // 3D Volumetric Cloud Pipeline (Sky dome, Depth test ON, Depth write OFF, Alpha Blending ON)
     Pipeline cloudPipeline(context, postProcessRenderer.getHDRFormat(), swapchain.getDepthFormat(),
@@ -487,6 +592,7 @@ void run() {
             window.resetResizedFlag();
             swapchain.recreate(screenW, screenH);
             postProcessRenderer.recreate(screenW, screenH);
+            updateWaterDescriptorSets();
         }
         
         glm::vec2 mousePos = Input::getMousePosition();
@@ -907,6 +1013,7 @@ void run() {
                     if (swapchain.isVSyncEnabled() != options.vsync) {
                         swapchain.setVSync(options.vsync, window.getWidth(), window.getHeight());
                         postProcessRenderer.recreate(window.getWidth(), window.getHeight());
+                        updateWaterDescriptorSets();
                     }
                     if (action == 13 || action == 14) {
                         int targetW = resList[std::clamp(options.resIndex, 0, 3)][0];
@@ -914,6 +1021,7 @@ void run() {
                         window.setWindowMode(options.windowMode, targetW, targetH, window.getRefreshRate());
                         swapchain.recreate(window.getWidth(), window.getHeight());
                         postProcessRenderer.recreate(window.getWidth(), window.getHeight());
+                        updateWaterDescriptorSets();
                     }
                     ConfigManager::save(options, exeDir + "options.txt");
                 } else if (action == 4) {
@@ -937,10 +1045,12 @@ void run() {
                         window.setWindowMode(options.windowMode, targetW, targetH, window.getRefreshRate());
                         swapchain.recreate(window.getWidth(), window.getHeight());
                         postProcessRenderer.recreate(window.getWidth(), window.getHeight());
+                        updateWaterDescriptorSets();
                     }
                     if (swapchain.isVSyncEnabled() != options.vsync) {
                         swapchain.setVSync(options.vsync, window.getWidth(), window.getHeight());
                         postProcessRenderer.recreate(window.getWidth(), window.getHeight());
+                        updateWaterDescriptorSets();
                     }
                     if (options.cloudSeed != currentCloudSeed) {
                         context.waitIdle();
@@ -1031,6 +1141,7 @@ void run() {
         if (imageIndex == UINT32_MAX) {
             swapchain.recreate(window.getWidth(), window.getHeight());
             postProcessRenderer.recreate(window.getWidth(), window.getHeight());
+            updateWaterDescriptorSets();
             continue;
         }
 
@@ -1315,7 +1426,7 @@ void run() {
         depthAtt.imageView = swapchain.getDepthImageView();
         depthAtt.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
         depthAtt.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        depthAtt.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depthAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         depthAtt.clearValue.depthStencil = { 1.0f, 0 };
 
         VkRenderingInfo hdrRenderInfo{};
@@ -1406,9 +1517,31 @@ void run() {
                 }
             }
 
-            // 3. Render Translucent Water Chunks
+            // 3. Screen-Space Reflection Snapshot & Water Dynamic Render Pass
+            vkCmdEndRendering(cmd);
+
+            postProcessRenderer.copyHDRToSSR(cmd);
+
+            VkRenderingAttachmentInfo waterColorAtt = hdrColorAtt;
+            waterColorAtt.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            waterColorAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+            VkRenderingAttachmentInfo waterDepthAtt = depthAtt;
+            waterDepthAtt.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+            waterDepthAtt.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+
+            VkRenderingInfo waterRenderInfo = hdrRenderInfo;
+            waterRenderInfo.pColorAttachments = &waterColorAtt;
+            waterRenderInfo.pDepthAttachment = &waterDepthAtt;
+
+            vkCmdBeginRendering(cmd, &waterRenderInfo);
+
+            vkCmdSetViewport(cmd, 0, 1, &viewport);
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+            VkDescriptorSet currentWaterDescSet = waterDescSets[currentFrame];
             waterPipeline.bind(cmd);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline.getLayout(), 0, 1, &currentSceneDescSet, 0, nullptr);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, waterPipeline.getLayout(), 0, 1, &currentWaterDescSet, 0, nullptr);
 
             for (const auto& [coord, chunk] : world->getMeshes()) {
                 if (chunk.waterIndexCount == 0 || !chunk.waterVertexBuffer.isValid()) continue;
@@ -1496,6 +1629,7 @@ void run() {
         if (!commandQueue.endFrame(swapchain, imageIndex)) {
             swapchain.recreate(window.getWidth(), window.getHeight());
             postProcessRenderer.recreate(window.getWidth(), window.getHeight());
+            updateWaterDescriptorSets();
         }
 
         // Max FPS Framerate Limiter
@@ -1512,6 +1646,8 @@ void run() {
     context.waitIdle();
     vkDestroyDescriptorPool(context.getDevice(), sceneDescPool, nullptr);
     vkDestroyDescriptorSetLayout(context.getDevice(), sceneDescLayout, nullptr);
+    vkDestroyDescriptorPool(context.getDevice(), waterDescPool, nullptr);
+    vkDestroyDescriptorSetLayout(context.getDevice(), waterDescLayout, nullptr);
     AudioEngine::get().shutdown();
 }
 

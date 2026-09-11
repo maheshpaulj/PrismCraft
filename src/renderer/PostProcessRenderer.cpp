@@ -23,6 +23,8 @@ PostProcessRenderer::PostProcessRenderer(VulkanContext& context, uint32_t width,
     samplerInfo.maxLod = 1.0f;
     VK_CHECK(vkCreateSampler(m_context.getDevice(), &samplerInfo, nullptr, &m_hdrSampler),
              "Failed to create PostProcess HDR sampler!");
+    VK_CHECK(vkCreateSampler(m_context.getDevice(), &samplerInfo, nullptr, &m_ssrSampler),
+             "Failed to create PostProcess SSR sampler!");
 
     // 2. Create Descriptor Set Layout (Binding 0 = Combined Image Sampler)
     VkDescriptorSetLayoutBinding binding{};
@@ -79,6 +81,9 @@ PostProcessRenderer::~PostProcessRenderer() {
     if (m_hdrSampler != VK_NULL_HANDLE) {
         vkDestroySampler(m_context.getDevice(), m_hdrSampler, nullptr);
     }
+    if (m_ssrSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(m_context.getDevice(), m_ssrSampler, nullptr);
+    }
 }
 
 void PostProcessRenderer::createResources(uint32_t width, uint32_t height) {
@@ -95,7 +100,7 @@ void PostProcessRenderer::createResources(uint32_t width, uint32_t height) {
     imageInfo.format = m_hdrFormat;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -118,13 +123,34 @@ void PostProcessRenderer::createResources(uint32_t width, uint32_t height) {
     VK_CHECK(vkCreateImageView(m_context.getDevice(), &viewInfo, nullptr, &m_hdrImageView),
              "Failed to create PostProcess HDR image view!");
 
+    // Create Dedicated Screen-Space Reflection (SSR) Target
+    VkImageCreateInfo ssrInfo = imageInfo;
+    ssrInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    VK_CHECK(vmaCreateImage(m_context.getAllocator(), &ssrInfo, &allocInfo, &m_ssrImage, &m_ssrAllocation, nullptr),
+             "Failed to allocate PostProcess SSR image!");
+
+    VkImageViewCreateInfo ssrViewInfo = viewInfo;
+    ssrViewInfo.image = m_ssrImage;
+    VK_CHECK(vkCreateImageView(m_context.getDevice(), &ssrViewInfo, nullptr, &m_ssrImageView),
+             "Failed to create PostProcess SSR image view!");
+
     m_currentHDRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    m_currentSSRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     // Update Descriptor Set with new HDR Image View
     createDescriptorSet();
 }
 
 void PostProcessRenderer::cleanupResources() {
+    if (m_ssrImageView != VK_NULL_HANDLE) {
+        vkDestroyImageView(m_context.getDevice(), m_ssrImageView, nullptr);
+        m_ssrImageView = VK_NULL_HANDLE;
+    }
+    if (m_ssrImage != VK_NULL_HANDLE) {
+        vmaDestroyImage(m_context.getAllocator(), m_ssrImage, m_ssrAllocation);
+        m_ssrImage = VK_NULL_HANDLE;
+        m_ssrAllocation = VK_NULL_HANDLE;
+    }
     if (m_hdrImageView != VK_NULL_HANDLE) {
         vkDestroyImageView(m_context.getDevice(), m_hdrImageView, nullptr);
         m_hdrImageView = VK_NULL_HANDLE;
@@ -226,6 +252,92 @@ void PostProcessRenderer::transitionHDRForSampling(VkCommandBuffer cmd) {
     vkCmdPipelineBarrier2(cmd, &depInfo);
 
     m_currentHDRLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+}
+
+void PostProcessRenderer::copyHDRToSSR(VkCommandBuffer cmd) {
+    // 1. Transition m_hdrImage from COLOR_ATTACHMENT_OPTIMAL to TRANSFER_SRC_OPTIMAL
+    VkImageMemoryBarrier2 srcBarrier{};
+    srcBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    srcBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    srcBarrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    srcBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    srcBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+    srcBarrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    srcBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    srcBarrier.image = m_hdrImage;
+    srcBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    srcBarrier.subresourceRange.baseMipLevel = 0;
+    srcBarrier.subresourceRange.levelCount = 1;
+    srcBarrier.subresourceRange.baseArrayLayer = 0;
+    srcBarrier.subresourceRange.layerCount = 1;
+
+    // 2. Transition m_ssrImage from current layout to TRANSFER_DST_OPTIMAL
+    VkImageMemoryBarrier2 dstBarrier{};
+    dstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    dstBarrier.srcStageMask = (m_currentSSRLayout == VK_IMAGE_LAYOUT_UNDEFINED) ?
+        VK_PIPELINE_STAGE_2_NONE : (VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT);
+    dstBarrier.srcAccessMask = (m_currentSSRLayout == VK_IMAGE_LAYOUT_UNDEFINED) ?
+        0 : (VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    dstBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    dstBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    dstBarrier.oldLayout = m_currentSSRLayout;
+    dstBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    dstBarrier.image = m_ssrImage;
+    dstBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    dstBarrier.subresourceRange.baseMipLevel = 0;
+    dstBarrier.subresourceRange.levelCount = 1;
+    dstBarrier.subresourceRange.baseArrayLayer = 0;
+    dstBarrier.subresourceRange.layerCount = 1;
+
+    VkImageMemoryBarrier2 preBarriers[2] = { srcBarrier, dstBarrier };
+    VkDependencyInfo preDep{};
+    preDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    preDep.imageMemoryBarrierCount = 2;
+    preDep.pImageMemoryBarriers = preBarriers;
+    vkCmdPipelineBarrier2(cmd, &preDep);
+
+    // 3. Fast hardware DMA copy of the rendered opaque scene
+    VkImageCopy copyRegion{};
+    copyRegion.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copyRegion.srcSubresource.mipLevel = 0;
+    copyRegion.srcSubresource.baseArrayLayer = 0;
+    copyRegion.srcSubresource.layerCount = 1;
+    copyRegion.srcOffset = { 0, 0, 0 };
+    copyRegion.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copyRegion.dstSubresource.mipLevel = 0;
+    copyRegion.dstSubresource.baseArrayLayer = 0;
+    copyRegion.dstSubresource.layerCount = 1;
+    copyRegion.dstOffset = { 0, 0, 0 };
+    copyRegion.extent = { m_width, m_height, 1 };
+    vkCmdCopyImage(cmd, m_hdrImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   m_ssrImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                   1, &copyRegion);
+
+    // 4. Transition m_hdrImage back to COLOR_ATTACHMENT_OPTIMAL so water and clouds can render into it
+    srcBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    srcBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+    srcBarrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    srcBarrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT;
+    srcBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    srcBarrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    // 5. Transition m_ssrImage to SHADER_READ_ONLY_OPTIMAL for water shader sampling
+    dstBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    dstBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    dstBarrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    dstBarrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+    dstBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    dstBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkImageMemoryBarrier2 postBarriers[2] = { srcBarrier, dstBarrier };
+    VkDependencyInfo postDep{};
+    postDep.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    postDep.imageMemoryBarrierCount = 2;
+    postDep.pImageMemoryBarriers = postBarriers;
+    vkCmdPipelineBarrier2(cmd, &postDep);
+
+    m_currentHDRLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    m_currentSSRLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 }
 
 void PostProcessRenderer::render(VkCommandBuffer cmd, VkImageView swapchainImageView, VkExtent2D extent,
