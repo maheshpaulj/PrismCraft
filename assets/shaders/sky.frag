@@ -74,8 +74,8 @@ void main() {
     // -------------------------------------------------------------
     // Midday: Pure atmospheric azure blue at zenith -> soft luminous sky blue at horizon
     // (Never oversaturated cyan, never washed out pure white)
-    vec3 zenithDay   = vec3(0.18, 0.42, 0.82);
-    vec3 horizonDay  = vec3(0.58, 0.72, 0.88);
+    vec3 zenithDay   = vec3(0.16, 0.40, 0.88);
+    vec3 horizonDay  = vec3(0.55, 0.70, 0.92);
     vec3 groundDay   = vec3(0.24, 0.28, 0.22);
 
     // Sunset / Golden Hour: Twilight indigo at zenith -> warm golden-peach at horizon
@@ -84,9 +84,9 @@ void main() {
     vec3 groundDusk  = vec3(0.20, 0.14, 0.10);
 
     // Night: Deep celestial navy at zenith -> subtle ambient indigo above horizon
-    vec3 zenithNight = vec3(0.004, 0.007, 0.016);
-    vec3 horizonNight= vec3(0.012, 0.018, 0.034);
-    vec3 groundNight = vec3(0.005, 0.007, 0.009);
+    vec3 zenithNight = vec3(0.007, 0.012, 0.025);
+    vec3 horizonNight= vec3(0.018, 0.025, 0.048);
+    vec3 groundNight = vec3(0.008, 0.012, 0.016);
 
     // Interpolate palettes across the celestial time cycle
     vec3 dayZenith   = mix(zenithDay, zenithDusk, goldenHour);

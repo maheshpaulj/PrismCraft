@@ -356,7 +356,7 @@ void run() {
     // -------------------------------------------------------------
     // Water Descriptor Set Layout (Binding 0=Atlas, 1=ShadowMap, 2=ShadowUBO, 3=SSRTexture)
     // -------------------------------------------------------------
-    VkDescriptorSetLayoutBinding waterBindings[4]{};
+    VkDescriptorSetLayoutBinding waterBindings[5]{};
     waterBindings[0] = sceneBindings[0];
     waterBindings[1] = sceneBindings[1];
     waterBindings[2] = sceneBindings[2];
@@ -364,10 +364,14 @@ void run() {
     waterBindings[3].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     waterBindings[3].descriptorCount = 1;
     waterBindings[3].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    waterBindings[4].binding = 4;
+    waterBindings[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    waterBindings[4].descriptorCount = 1;
+    waterBindings[4].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     VkDescriptorSetLayoutCreateInfo waterLayoutInfo{};
     waterLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    waterLayoutInfo.bindingCount = 4;
+    waterLayoutInfo.bindingCount = 5;
     waterLayoutInfo.pBindings = waterBindings;
 
     VkDescriptorSetLayout waterDescLayout = VK_NULL_HANDLE;
@@ -376,7 +380,7 @@ void run() {
 
     VkDescriptorPoolSize waterPoolSizes[2]{};
     waterPoolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    waterPoolSizes[0].descriptorCount = 3 * MAX_FRAMES_IN_FLIGHT;
+    waterPoolSizes[0].descriptorCount = 4 * MAX_FRAMES_IN_FLIGHT;
     waterPoolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     waterPoolSizes[1].descriptorCount = MAX_FRAMES_IN_FLIGHT;
 
@@ -423,7 +427,12 @@ void run() {
             ssrImageInfo.imageView = postProcessRenderer.getSSRImageView();
             ssrImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-            VkWriteDescriptorSet writes[4]{};
+            VkDescriptorImageInfo depthImageInfo{};
+            depthImageInfo.sampler = postProcessRenderer.getSSRDepthSampler();
+            depthImageInfo.imageView = postProcessRenderer.getSSRDepthImageView();
+            depthImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            VkWriteDescriptorSet writes[5]{};
             writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             writes[0].dstSet = waterDescSets[i];
             writes[0].dstBinding = 0;
@@ -452,7 +461,14 @@ void run() {
             writes[3].descriptorCount = 1;
             writes[3].pImageInfo = &ssrImageInfo;
 
-            vkUpdateDescriptorSets(context.getDevice(), 4, writes, 0, nullptr);
+            writes[4].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writes[4].dstSet = waterDescSets[i];
+            writes[4].dstBinding = 4;
+            writes[4].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[4].descriptorCount = 1;
+            writes[4].pImageInfo = &depthImageInfo;
+
+            vkUpdateDescriptorSets(context.getDevice(), 5, writes, 0, nullptr);
         }
     };
 
@@ -472,7 +488,7 @@ void run() {
 
     // 3D Translucent Water Pipeline (Double-sided, Depth test ON, Depth write OFF, Alpha Blending ON)
     Pipeline waterPipeline(context, postProcessRenderer.getHDRFormat(), swapchain.getDepthFormat(),
-                           exeDir + "assets/shaders/cell.vert.spv", exeDir + "assets/shaders/water.frag.spv",
+                           exeDir + "assets/shaders/water.vert.spv", exeDir + "assets/shaders/water.frag.spv",
                            waterDescLayout, true, false, BlendMode::Alpha, VK_CULL_MODE_NONE);
 
     // 3D Volumetric Cloud Pipeline (Sky dome, Depth test ON, Depth write OFF, Alpha Blending ON)
@@ -770,9 +786,16 @@ void run() {
                     }
                 }
 
+                // OptiFine 5x Dynamic Zoom (Hold 'C')
+                bool isZooming = (!isChatOpen && Input::isKeyDown(GLFW_KEY_C));
+                float targetFov = isZooming ? (static_cast<float>(options.fov) / 5.0f) : static_cast<float>(options.fov);
+                player.getCamera().fov += (targetFov - player.getCamera().fov) * std::min(1.0f, dt * 22.0f);
+                float zoomRatio = player.getCamera().fov / static_cast<float>(options.fov);
+                player.mouseSensitivity = options.mouseSens * zoomRatio;
+
                 player.handleInput(dt);
                 player.update(dt, *world);
-                world->update(player.getPosition());
+                world->update(player.getPosition(), dt);
                 itemDropManager.update(dt, *world, player);
                 fallingBlockManager.update(dt, *world);
                 arrowManager.update(dt, *world, player);
@@ -1270,8 +1293,7 @@ void run() {
                           | ((options.clouds ? 1 : 0) << 1)
                           | (((options.cloudShadows && options.vibrantVisuals) ? 1 : 0) << 2)
                           | ((options.smoothLighting ? 1 : 0) << 3)
-                          | ((options.torchColorBleed ? 1 : 0) << 4)
-                          | (((options.vibrantVisuals ? options.atmosphericFog : 0) & 3) << 5);
+                          | ((options.torchColorBleed ? 1 : 0) << 4);
         pc.shaderOptions[3] = static_cast<float>(settingsFlags);
 
         float dayFactor = std::clamp((sunHeight + 0.10f) / 0.35f, 0.0f, 1.0f);
@@ -1464,7 +1486,16 @@ void run() {
             // 1. Render Triangular Sun & Moon
             celestialRenderer.render(cmd, worldPipeline, camPos, sunDir, vp);
 
-            // 2. Render Opaque World Chunks
+            // 2. Render 3D Drifting Volumetric Clouds (rendered before terrain so chunks occlude them, and SSR captures them)
+            if (options.clouds && !isUnderwater) {
+                cloudPipeline.bind(cmd);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cloudPipeline.getLayout(), 0, 1, &cloudDescSet, 0, nullptr);
+                cloudRenderer.render(cmd, cloudPipeline, camPos, timer.getElapsedTime(), vp, skyColor, sunDir, dayFactor, sunHeight, options.vibrantVisuals, options.exposure);
+                worldPipeline.bind(cmd);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, worldPipeline.getLayout(), 0, 1, &currentSceneDescSet, 0, nullptr);
+            }
+
+            // 3. Render Opaque World Chunks
             for (const auto& [coord, chunk] : world->getMeshes()) {
                 if (chunk.opaqueIndexCount == 0 || !chunk.opaqueVertexBuffer.isValid()) continue;
                 if (!World::isChunkInFrustum(coord, frustum)) continue;
@@ -1508,19 +1539,17 @@ void run() {
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, worldPipeline.getLayout(), 0, 1, &currentSceneDescSet, 0, nullptr);
             }
 
-            // Render First-Person Hand or Third-Person Triangular Player Character Model
+            // Render Third-Person Triangular Player Character Model (Steve in world)
             if (state == GameState::Playing || state == GameState::Paused || state == GameState::Inventory || state == GameState::CraftingTable) {
-                if (player.getCamera().getMode() == CameraMode::FirstPerson) {
-                    handRenderer.render(cmd, worldPipeline, player, view, proj, pc, normPlayerSky, normPlayerTorch);
-                } else {
+                if (player.getCamera().getMode() != CameraMode::FirstPerson) {
                     playerModelRenderer.render(cmd, worldPipeline, player, vp, pc, normPlayerSky, normPlayerTorch);
                 }
             }
 
-            // 3. Screen-Space Reflection Snapshot & Water Dynamic Render Pass
+            // 4. Water Dynamic Render Pass (with SSR snapshot)
             vkCmdEndRendering(cmd);
 
-            postProcessRenderer.copyHDRToSSR(cmd);
+            postProcessRenderer.copyHDRToSSR(cmd, swapchain.getDepthImage());
 
             VkRenderingAttachmentInfo waterColorAtt = hdrColorAtt;
             waterColorAtt.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
@@ -1558,11 +1587,13 @@ void run() {
                 vkCmdDrawIndexed(cmd, chunk.waterIndexCount, 1, 0, 0, 0);
             }
 
-            // 4. Render 3D Drifting Volumetric Clouds
-            if (options.clouds && !isUnderwater) {
-                cloudPipeline.bind(cmd);
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, cloudPipeline.getLayout(), 0, 1, &cloudDescSet, 0, nullptr);
-                cloudRenderer.render(cmd, cloudPipeline, camPos, timer.getElapsedTime(), vp, skyColor, sunDir, dayFactor, sunHeight, options.vibrantVisuals, options.exposure);
+            // 5. Render First-Person Hand (after water and SSR copy so it is NEVER reflected in water)
+            if (state == GameState::Playing || state == GameState::Paused || state == GameState::Inventory || state == GameState::CraftingTable) {
+                if (player.getCamera().getMode() == CameraMode::FirstPerson) {
+                    worldPipeline.bind(cmd);
+                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, worldPipeline.getLayout(), 0, 1, &currentSceneDescSet, 0, nullptr);
+                    handRenderer.render(cmd, worldPipeline, player, view, proj, pc, normPlayerSky, normPlayerTorch);
+                }
             }
         }
 

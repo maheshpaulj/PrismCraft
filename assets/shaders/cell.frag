@@ -259,61 +259,6 @@ float sampleRealtimeShadow(vec3 worldPos, vec3 N, vec3 L, int quality) {
 }
 
 // -------------------------------------------------------------
-// Fast 2D OpenSimplex-like Noise & Terrain Height (Matching TerrainGen.cpp)
-// -------------------------------------------------------------
-vec2 hash2D(vec2 p) {
-    p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
-    return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
-}
-
-float terrainNoise2D(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(dot(hash2D(i + vec2(0.0, 0.0)), f - vec2(0.0, 0.0)),
-                   dot(hash2D(i + vec2(1.0, 0.0)), f - vec2(1.0, 0.0)), u.x),
-               mix(dot(hash2D(i + vec2(0.0, 1.0)), f - vec2(0.0, 1.0)),
-                   dot(hash2D(i + vec2(1.0, 1.0)), f - vec2(1.0, 1.0)), u.x), u.y);
-}
-
-float getTerrainHeight(vec2 worldXZ) {
-    vec2 p = vec2(worldXZ.x, worldXZ.y * 0.8660254);
-    float cont = terrainNoise2D(p * 0.0035);
-    float det  = terrainNoise2D(p * 0.015 + vec2(10.1, 15.3));
-    float h = 52.0;
-    if (cont < -0.30) {
-        float t = (-cont - 0.30) / 0.70;
-        h = 42.0 - t * 14.0 + det * 2.0;
-    } else if (cont < -0.15) {
-        float t = (cont + 0.30) / 0.15;
-        h = 43.0 + t * 7.0 + det * 1.5;
-    } else if (cont <= 0.45) {
-        float t = (cont + 0.15) / 0.60;
-        h = 50.5 + t * 3.0 + det * 2.0;
-    } else if (cont <= 0.75) {
-        float t = (cont - 0.45) / 0.30;
-        h = 54.0 + t * 16.0 + det * 4.0;
-    } else {
-        float t = (cont - 0.75) / 0.25;
-        h = 70.0 + t * 24.0 + det * 6.0;
-    }
-    return h;
-}
-
-// Dynamic Point Light Block Shadowing (Terrain & Block Occlusion)
-float testTorchBlockOcclusion(vec3 fragPos, vec3 lightPos) {
-    vec3 toLight = lightPos - fragPos;
-    float dist = length(toLight);
-    if (dist < 2.5) return 1.0;
-    vec3 p = mix(fragPos, lightPos, 0.5);
-    float th = getTerrainHeight(p.xz);
-    if (th > (p.y + 0.22)) {
-        return 0.15; // Terrain/block shadow
-    }
-    return 1.0;
-}
-
-// -------------------------------------------------------------
 // Dynamic Cloud Shadowing matching 3D sky cumulus clusters
 // -------------------------------------------------------------
 float sampleCloudShadow(vec3 worldPos, vec3 L) {
@@ -334,17 +279,14 @@ float sampleCloudShadow(vec3 worldPos, vec3 L) {
 // -------------------------------------------------------------
 // Clean Horizon Distance Fog: Smoothly fades chunks into horizon at edge of render distance
 // -------------------------------------------------------------
-vec3 applyHorizonDistanceFog(vec3 surfaceColor, vec3 fragPos, vec3 camPos, vec3 L, vec3 skyFogColor, float isDay, float goldenHour, int optAtmosFog, float fogEndDist) {
+vec3 applyHorizonDistanceFog(vec3 surfaceColor, vec3 fragPos, vec3 camPos, vec3 L, vec3 skyFogColor, float isDay, float goldenHour, float fogEndDist) {
     vec3 rayDir = fragPos - camPos;
     float rayDist = length(rayDir);
     if (rayDist < 0.001) return surfaceColor;
     vec3 V = rayDir / rayDist;
 
-    // Horizon fade start: 70% of render distance by default (55% if dense, 88% if off)
+    // Horizon fade start: 70% of render distance (clean, crisp nearby world, smooth horizon edge fade)
     float startRatio = 0.70;
-    if (optAtmosFog == 0) startRatio = 0.88;
-    else if (optAtmosFog == 2) startRatio = 0.55;
-
     float fogStart = fogEndDist * startRatio;
 
     // Everything closer than fogStart has ZERO fog: 100% crisp, vibrant, high-contrast nearby world!
@@ -400,7 +342,6 @@ void main() {
     bool optCloudShadows = (settingsFlags & 4) != 0;
     bool optSmoothLighting = (settingsFlags & 8) != 0;
     bool optTorchColorBleed = (settingsFlags & 16) != 0;
-    int optAtmosFog = (settingsFlags >> 5) & 3;
 
     vec3 N = normalize(fragNormal);
     vec3 L = normalize(pc.sunDir.xyz);
@@ -445,12 +386,12 @@ void main() {
 
     // Physical solar spectral irradiance in linear units
     // Midday: warm solar white (~5500K)
-    vec3 midDaySun = vec3(2.60, 2.50, 2.30);
+    vec3 midDaySun = vec3(2.80, 2.65, 2.25);
     // Sunset / Golden Hour: rich radiant amber gold
-    vec3 goldenSun = vec3(3.20, 2.10, 0.95);
+    vec3 goldenSun = vec3(3.50, 2.20, 0.80);
     vec3 sunColor  = mix(midDaySun, goldenSun, goldenHour);
     // Moonlight: soft lunar silver
-    vec3 moonColor = vec3(0.20, 0.28, 0.42);
+    vec3 moonColor = vec3(0.28, 0.36, 0.52);
     vec3 celestialLightColor = mix(moonColor, sunColor, isDay) * directFactor;
 
     // 3. Foliage Translucency / Backlight (Subsurface transmission through leaves and grass)
@@ -473,10 +414,10 @@ void main() {
 
     // 4. Ambient Skylight & Contact Occlusion in Linear Space
     float skyHemisphere = clamp(N.y * 0.5 + 0.5, 0.0, 1.0);
-    vec3 ambientGround = mix(vec3(0.20, 0.24, 0.18), vec3(0.28, 0.22, 0.14), goldenHour);
-    vec3 ambientSky    = mix(vec3(0.42, 0.54, 0.74), vec3(0.52, 0.40, 0.28), goldenHour);
+    vec3 ambientGround = mix(vec3(0.22, 0.26, 0.18), vec3(0.30, 0.24, 0.14), goldenHour);
+    vec3 ambientSky    = mix(vec3(0.46, 0.58, 0.78), vec3(0.55, 0.42, 0.28), goldenHour);
     vec3 daySkyAmbient = mix(ambientGround, ambientSky, skyHemisphere);
-    vec3 nightSkyAmbient = mix(vec3(0.045, 0.060, 0.095), vec3(0.070, 0.095, 0.150), skyHemisphere);
+    vec3 nightSkyAmbient = mix(vec3(0.065, 0.080, 0.120), vec3(0.095, 0.120, 0.175), skyHemisphere);
     vec3 ambientLight = mix(nightSkyAmbient, daySkyAmbient, isDay);
 
     // Directional ambient response: vertical walls facing away from the sun receive cooler, darker ambient (~25% darker)
@@ -504,26 +445,21 @@ void main() {
     // A. Handheld Torch (in player's right hand)
     if (pc.heldTorch.w > 0.001) {
         float playerOcc = optPlayerShadow ? computePlayerTorchOcclusion(fragWorldPos, pc.heldTorch.xyz, pc.playerPos.xyz) : 1.0;
-        float blockOcc = testTorchBlockOcclusion(fragWorldPos, pc.heldTorch.xyz);
-        torchLight += evalPointLight(pc.heldTorch.xyz, pc.heldTorch.w, 15.0, fragWorldPos, N, vibrant, optTorchColorBleed) * (playerOcc * blockOcc * smoothLighting);
+        torchLight += evalPointLight(pc.heldTorch.xyz, pc.heldTorch.w, 15.0, fragWorldPos, N, vibrant, optTorchColorBleed) * (playerOcc * smoothLighting);
     }
 
     // B. Nearest Placed and Dropped Torches (dynamic per-pixel point lights 1 to 4)
     if (pc.pointLight1.w > 0.001) {
-        float blockOcc = testTorchBlockOcclusion(fragWorldPos, pc.pointLight1.xyz);
-        torchLight += evalPointLight(pc.pointLight1.xyz, pc.pointLight1.w, 15.0, fragWorldPos, N, vibrant, optTorchColorBleed) * (blockOcc * smoothLighting);
+        torchLight += evalPointLight(pc.pointLight1.xyz, pc.pointLight1.w, 15.0, fragWorldPos, N, vibrant, optTorchColorBleed) * smoothLighting;
     }
     if (pc.pointLight2.w > 0.001) {
-        float blockOcc = testTorchBlockOcclusion(fragWorldPos, pc.pointLight2.xyz);
-        torchLight += evalPointLight(pc.pointLight2.xyz, pc.pointLight2.w, 15.0, fragWorldPos, N, vibrant, optTorchColorBleed) * (blockOcc * smoothLighting);
+        torchLight += evalPointLight(pc.pointLight2.xyz, pc.pointLight2.w, 15.0, fragWorldPos, N, vibrant, optTorchColorBleed) * smoothLighting;
     }
     if (pc.pointLight3.w > 0.001) {
-        float blockOcc = testTorchBlockOcclusion(fragWorldPos, pc.pointLight3.xyz);
-        torchLight += evalPointLight(pc.pointLight3.xyz, pc.pointLight3.w, 15.0, fragWorldPos, N, vibrant, optTorchColorBleed) * (blockOcc * smoothLighting);
+        torchLight += evalPointLight(pc.pointLight3.xyz, pc.pointLight3.w, 15.0, fragWorldPos, N, vibrant, optTorchColorBleed) * smoothLighting;
     }
     if (pc.pointLight4.w > 0.001) {
-        float blockOcc = testTorchBlockOcclusion(fragWorldPos, pc.pointLight4.xyz);
-        torchLight += evalPointLight(pc.pointLight4.xyz, pc.pointLight4.w, 15.0, fragWorldPos, N, vibrant, optTorchColorBleed) * (blockOcc * smoothLighting);
+        torchLight += evalPointLight(pc.pointLight4.xyz, pc.pointLight4.w, 15.0, fragWorldPos, N, vibrant, optTorchColorBleed) * smoothLighting;
     }
 
     // C. Distant Placed World Torches (baked into vertex color b-channel)
@@ -578,7 +514,6 @@ void main() {
             pc.skyFog.rgb,
             isDay,
             goldenHour,
-            optAtmosFog,
             fogEnd
         );
     }

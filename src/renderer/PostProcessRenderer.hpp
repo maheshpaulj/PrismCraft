@@ -36,12 +36,14 @@ public:
                     float exposure, float vibrance, float bloomStrength, float time,
                     bool vibrantVisuals, float sharpening = 0.0f);
 
-    void copyHDRToSSR(VkCommandBuffer cmd);
+    void copyHDRToSSR(VkCommandBuffer cmd, VkImage sceneDepthImage = VK_NULL_HANDLE);
 
     [[nodiscard]] VkImageView getHDRImageView() const { return m_hdrImageView; }
     [[nodiscard]] VkImage getHDRImage() const { return m_hdrImage; }
     [[nodiscard]] VkImageView getSSRImageView() const { return m_ssrImageView; }
     [[nodiscard]] VkSampler getSSRSampler() const { return m_ssrSampler; }
+    [[nodiscard]] VkImageView getSSRDepthImageView() const { return m_ssrDepthImageView; }
+    [[nodiscard]] VkSampler getSSRDepthSampler() const { return m_ssrDepthSampler; }
     [[nodiscard]] VkFormat getHDRFormat() const { return m_hdrFormat; }
     [[nodiscard]] uint32_t getWidth() const { return m_width; }
     [[nodiscard]] uint32_t getHeight() const { return m_height; }
@@ -68,8 +70,14 @@ private:
     VkImageView m_ssrImageView = VK_NULL_HANDLE;
     VkSampler m_ssrSampler = VK_NULL_HANDLE;
 
+    VkImage m_ssrDepthImage = VK_NULL_HANDLE;
+    VmaAllocation m_ssrDepthAllocation = VK_NULL_HANDLE;
+    VkImageView m_ssrDepthImageView = VK_NULL_HANDLE;
+    VkSampler m_ssrDepthSampler = VK_NULL_HANDLE;
+
     VkImageLayout m_currentHDRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkImageLayout m_currentSSRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageLayout m_currentSSRDepthLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkDescriptorSetLayout m_descLayout = VK_NULL_HANDLE;
     VkDescriptorPool m_descPool = VK_NULL_HANDLE;

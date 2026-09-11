@@ -26,6 +26,13 @@ PostProcessRenderer::PostProcessRenderer(VulkanContext& context, uint32_t width,
     VK_CHECK(vkCreateSampler(m_context.getDevice(), &samplerInfo, nullptr, &m_ssrSampler),
              "Failed to create PostProcess SSR sampler!");
 
+    VkSamplerCreateInfo depthSamplerInfo = samplerInfo;
+    depthSamplerInfo.magFilter = VK_FILTER_NEAREST;
+    depthSamplerInfo.minFilter = VK_FILTER_NEAREST;
+    depthSamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    VK_CHECK(vkCreateSampler(m_context.getDevice(), &depthSamplerInfo, nullptr, &m_ssrDepthSampler),
+             "Failed to create PostProcess SSR depth sampler!");
+
     // 2. Create Descriptor Set Layout (Binding 0 = Combined Image Sampler)
     VkDescriptorSetLayoutBinding binding{};
     binding.binding = 0;
@@ -84,6 +91,9 @@ PostProcessRenderer::~PostProcessRenderer() {
     if (m_ssrSampler != VK_NULL_HANDLE) {
         vkDestroySampler(m_context.getDevice(), m_ssrSampler, nullptr);
     }
+    if (m_ssrDepthSampler != VK_NULL_HANDLE) {
+        vkDestroySampler(m_context.getDevice(), m_ssrDepthSampler, nullptr);
+    }
 }
 
 void PostProcessRenderer::createResources(uint32_t width, uint32_t height) {
@@ -134,14 +144,54 @@ void PostProcessRenderer::createResources(uint32_t width, uint32_t height) {
     VK_CHECK(vkCreateImageView(m_context.getDevice(), &ssrViewInfo, nullptr, &m_ssrImageView),
              "Failed to create PostProcess SSR image view!");
 
+    // Create Dedicated Screen-Space Reflection Depth Target
+    VkImageCreateInfo depthInfo{};
+    depthInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    depthInfo.imageType = VK_IMAGE_TYPE_2D;
+    depthInfo.extent = { m_width, m_height, 1 };
+    depthInfo.mipLevels = 1;
+    depthInfo.arrayLayers = 1;
+    depthInfo.format = VK_FORMAT_D32_SFLOAT;
+    depthInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    depthInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    depthInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VK_CHECK(vmaCreateImage(m_context.getAllocator(), &depthInfo, &allocInfo, &m_ssrDepthImage, &m_ssrDepthAllocation, nullptr),
+             "Failed to allocate PostProcess SSR depth image!");
+
+    VkImageViewCreateInfo depthViewInfo{};
+    depthViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    depthViewInfo.image = m_ssrDepthImage;
+    depthViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    depthViewInfo.format = VK_FORMAT_D32_SFLOAT;
+    depthViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    depthViewInfo.subresourceRange.baseMipLevel = 0;
+    depthViewInfo.subresourceRange.levelCount = 1;
+    depthViewInfo.subresourceRange.baseArrayLayer = 0;
+    depthViewInfo.subresourceRange.layerCount = 1;
+    VK_CHECK(vkCreateImageView(m_context.getDevice(), &depthViewInfo, nullptr, &m_ssrDepthImageView),
+             "Failed to create PostProcess SSR depth image view!");
+
     m_currentHDRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     m_currentSSRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    m_currentSSRDepthLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     // Update Descriptor Set with new HDR Image View
     createDescriptorSet();
 }
 
 void PostProcessRenderer::cleanupResources() {
+    if (m_ssrDepthImageView != VK_NULL_HANDLE) {
+        vkDestroyImageView(m_context.getDevice(), m_ssrDepthImageView, nullptr);
+        m_ssrDepthImageView = VK_NULL_HANDLE;
+    }
+    if (m_ssrDepthImage != VK_NULL_HANDLE) {
+        vmaDestroyImage(m_context.getAllocator(), m_ssrDepthImage, m_ssrDepthAllocation);
+        m_ssrDepthImage = VK_NULL_HANDLE;
+        m_ssrDepthAllocation = VK_NULL_HANDLE;
+    }
     if (m_ssrImageView != VK_NULL_HANDLE) {
         vkDestroyImageView(m_context.getDevice(), m_ssrImageView, nullptr);
         m_ssrImageView = VK_NULL_HANDLE;
@@ -254,7 +304,7 @@ void PostProcessRenderer::transitionHDRForSampling(VkCommandBuffer cmd) {
     m_currentHDRLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 }
 
-void PostProcessRenderer::copyHDRToSSR(VkCommandBuffer cmd) {
+void PostProcessRenderer::copyHDRToSSR(VkCommandBuffer cmd, VkImage sceneDepthImage) {
     // 1. Transition m_hdrImage from COLOR_ATTACHMENT_OPTIMAL to TRANSFER_SRC_OPTIMAL
     VkImageMemoryBarrier2 srcBarrier{};
     srcBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -338,6 +388,87 @@ void PostProcessRenderer::copyHDRToSSR(VkCommandBuffer cmd) {
 
     m_currentHDRLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     m_currentSSRLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    // 6. Copy Scene Depth Buffer into m_ssrDepthImage for SSR depth testing
+    if (sceneDepthImage != VK_NULL_HANDLE && m_ssrDepthImage != VK_NULL_HANDLE) {
+        VkImageMemoryBarrier2 depthSrcBarrier{};
+        depthSrcBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        depthSrcBarrier.srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+        depthSrcBarrier.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        depthSrcBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        depthSrcBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+        depthSrcBarrier.oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        depthSrcBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        depthSrcBarrier.image = sceneDepthImage;
+        depthSrcBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        depthSrcBarrier.subresourceRange.baseMipLevel = 0;
+        depthSrcBarrier.subresourceRange.levelCount = 1;
+        depthSrcBarrier.subresourceRange.baseArrayLayer = 0;
+        depthSrcBarrier.subresourceRange.layerCount = 1;
+
+        VkImageMemoryBarrier2 depthDstBarrier{};
+        depthDstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+        depthDstBarrier.srcStageMask = (m_currentSSRDepthLayout == VK_IMAGE_LAYOUT_UNDEFINED) ?
+            VK_PIPELINE_STAGE_2_NONE : (VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT);
+        depthDstBarrier.srcAccessMask = (m_currentSSRDepthLayout == VK_IMAGE_LAYOUT_UNDEFINED) ?
+            0 : (VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT);
+        depthDstBarrier.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        depthDstBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        depthDstBarrier.oldLayout = m_currentSSRDepthLayout;
+        depthDstBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        depthDstBarrier.image = m_ssrDepthImage;
+        depthDstBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        depthDstBarrier.subresourceRange.baseMipLevel = 0;
+        depthDstBarrier.subresourceRange.levelCount = 1;
+        depthDstBarrier.subresourceRange.baseArrayLayer = 0;
+        depthDstBarrier.subresourceRange.layerCount = 1;
+
+        VkImageMemoryBarrier2 preDepth[2] = { depthSrcBarrier, depthDstBarrier };
+        VkDependencyInfo preDepDepth{};
+        preDepDepth.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        preDepDepth.imageMemoryBarrierCount = 2;
+        preDepDepth.pImageMemoryBarriers = preDepth;
+        vkCmdPipelineBarrier2(cmd, &preDepDepth);
+
+        VkImageCopy depthCopy{};
+        depthCopy.srcSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        depthCopy.srcSubresource.mipLevel = 0;
+        depthCopy.srcSubresource.baseArrayLayer = 0;
+        depthCopy.srcSubresource.layerCount = 1;
+        depthCopy.srcOffset = { 0, 0, 0 };
+        depthCopy.dstSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        depthCopy.dstSubresource.mipLevel = 0;
+        depthCopy.dstSubresource.baseArrayLayer = 0;
+        depthCopy.dstSubresource.layerCount = 1;
+        depthCopy.dstOffset = { 0, 0, 0 };
+        depthCopy.extent = { m_width, m_height, 1 };
+        vkCmdCopyImage(cmd, sceneDepthImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       m_ssrDepthImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &depthCopy);
+
+        depthSrcBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        depthSrcBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
+        depthSrcBarrier.dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+        depthSrcBarrier.dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        depthSrcBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        depthSrcBarrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+
+        depthDstBarrier.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        depthDstBarrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        depthDstBarrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+        depthDstBarrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+        depthDstBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        depthDstBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkImageMemoryBarrier2 postDepth[2] = { depthSrcBarrier, depthDstBarrier };
+        VkDependencyInfo postDepDepth{};
+        postDepDepth.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+        postDepDepth.imageMemoryBarrierCount = 2;
+        postDepDepth.pImageMemoryBarriers = postDepth;
+        vkCmdPipelineBarrier2(cmd, &postDepDepth);
+
+        m_currentSSRDepthLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
 }
 
 void PostProcessRenderer::render(VkCommandBuffer cmd, VkImageView swapchainImageView, VkExtent2D extent,

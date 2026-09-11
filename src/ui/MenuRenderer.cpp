@@ -400,16 +400,16 @@ int MenuRenderer::handleClick(GameState& state, Player& player, glm::vec2 mouseP
             return 28;
         }
 
-        // Row 5: ATMOSPHERE FOG (toggle, left) | LOD PRESET (toggle, right)
-        if (inBox(lx, y0 + dy * 5.0f, bW, bH) && !isDown && options.vibrantVisuals) {
-            AudioEngine::get().playSound(SoundEffect::Click);
-            options.atmosphericFog = (options.atmosphericFog + 1) % 3;
-            return 30;
-        }
-        if (inBox(rx, y0 + dy * 5.0f, bW, bH) && !isDown) {
+        // Row 5: LOD PRESET (toggle, left) | WINDOW MODE (toggle, right)
+        if (inBox(lx, y0 + dy * 5.0f, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
             options.lodPreset = (options.lodPreset + 1) % 4;
             return 21;
+        }
+        if (inBox(rx, y0 + dy * 5.0f, bW, bH) && !isDown) {
+            AudioEngine::get().playSound(SoundEffect::Click);
+            options.windowMode = (options.windowMode + 1) % 3;
+            return 13;
         }
 
         // Row 6: UI SCALE (toggle, left) | RESOLUTION (toggle, right)
@@ -428,22 +428,15 @@ int MenuRenderer::handleClick(GameState& state, Player& player, glm::vec2 mouseP
             return 14;
         }
 
-        // Row 7: WINDOW MODE (toggle, left)
-        if (inBox(lx, y0 + dy * 7.0f, bW, bH) && !isDown) {
-            AudioEngine::get().playSound(SoundEffect::Click);
-            options.windowMode = (options.windowMode + 1) % 3;
-            return 13;
-        }
-
-        // Row 8: DONE / BACK (center)
+        // Row 7: DONE / BACK (center)
         float doneW = 320.0f;
         float doneH = 40.0f;
         float doneX = cx - doneW * 0.5f;
-        float doneY = y0 + dy * 8.0f + 10.0f;
+        float doneY = y0 + dy * 7.0f + 10.0f;
         if (inBox(doneX, doneY, doneW, doneH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
             state = GameState::Options;
-            return 6;
+            return 2;
         }
     } else if (state == GameState::ControlsSettings) {
         float bW = 260.0f;
@@ -1218,15 +1211,12 @@ void MenuRenderer::rebuildMenuMesh(GameState state, const Player& player, uint32
             : "STEVE SHADOW: OFF (LOCKED)";
         addRectButton(rx, y0 + dy * 4.0f, bW, bH, pShadowStr, inBox(rx, y0 + dy * 4.0f, bW, bH), options.vibrantVisuals && options.playerShadow);
 
-        // Row 5: ATMOSPHERE FOG | LOD PRESET
-        const char* atmosNames[] = {"ATMOSPHERE: OFF", "ATMOSPHERE: SUBTLE", "ATMOSPHERE: DENSE"};
-        std::string atmosStr = options.vibrantVisuals
-            ? atmosNames[std::clamp(options.atmosphericFog, 0, 2)]
-            : "ATMOSPHERE: OFF (LOCKED)";
-        addRectButton(lx, y0 + dy * 5.0f, bW, bH, atmosStr, inBox(lx, y0 + dy * 5.0f, bW, bH), options.vibrantVisuals && (options.atmosphericFog > 0));
-
+        // Row 5: LOD PRESET | WINDOW MODE
         const char* lodNames[] = {"LOD: PERFORMANCE", "LOD: BALANCED", "LOD: QUALITY", "LOD: ULTRA"};
-        addRectButton(rx, y0 + dy * 5.0f, bW, bH, lodNames[std::clamp(options.lodPreset, 0, 3)], inBox(rx, y0 + dy * 5.0f, bW, bH), true);
+        addRectButton(lx, y0 + dy * 5.0f, bW, bH, lodNames[std::clamp(options.lodPreset, 0, 3)], inBox(lx, y0 + dy * 5.0f, bW, bH), true);
+
+        const char* winModes[] = {"MODE: WINDOWED", "MODE: BORDERLESS", "MODE: FULLSCREEN"};
+        addRectButton(rx, y0 + dy * 5.0f, bW, bH, winModes[std::clamp(options.windowMode, 0, 2)], inBox(rx, y0 + dy * 5.0f, bW, bH), true);
 
         // Row 6: UI SCALE | RESOLUTION
         char uiBuf[64];
@@ -1236,15 +1226,11 @@ void MenuRenderer::rebuildMenuMesh(GameState state, const Player& player, uint32
         const char* resNames[] = {"RES: 1280x720", "RES: 1600x900", "RES: 1920x1080", "RES: 2560x1440"};
         addRectButton(rx, y0 + dy * 6.0f, bW, bH, resNames[std::clamp(options.resIndex, 0, 3)], inBox(rx, y0 + dy * 6.0f, bW, bH), true);
 
-        // Row 7: WINDOW MODE
-        const char* winModes[] = {"MODE: WINDOWED", "MODE: BORDERLESS", "MODE: FULLSCREEN"};
-        addRectButton(lx, y0 + dy * 7.0f, bW, bH, winModes[std::clamp(options.windowMode, 0, 2)], inBox(lx, y0 + dy * 7.0f, bW, bH), true);
-
-        // Row 8: DONE / BACK (center)
+        // Row 7: DONE / BACK (center)
         float doneW = 320.0f;
         float doneH = 40.0f;
         float doneX = cx - doneW * 0.5f;
-        float doneY = y0 + dy * 8.0f + 10.0f;
+        float doneY = y0 + dy * 7.0f + 10.0f;
         addRectButton(doneX, doneY, doneW, doneH, "DONE / BACK", inBox(doneX, doneY, doneW, doneH), true);
 
     } else if (state == GameState::AudioSettings) {

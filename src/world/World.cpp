@@ -28,7 +28,7 @@ World::~World() {
     m_threadPool.shutdown();
 }
 
-void World::update(const glm::vec3& playerPos) {
+void World::update(const glm::vec3& playerPos, float dt) {
     CellCoord playerCell = worldToCell(playerPos);
     ChunkCoord currentChunk = worldToChunk(playerCell.x, playerCell.z);
 
@@ -56,7 +56,10 @@ void World::update(const glm::vec3& playerPos) {
         unloadDistantChunks(currentChunk);
     }
 
-    // 4. Remesh dirty chunks within close radius immediately for responsive mining/building
+    // 4. Update Minecraft-style water fluid simulation
+    m_waterSimulator.update(dt, *this, playerPos);
+
+    // 5. Remesh dirty chunks within close radius immediately for responsive mining/building/water flow
     std::vector<ChunkCoord> dirtyToMesh;
     {
         std::shared_lock<std::shared_mutex> lock(m_chunksMutex);
@@ -501,7 +504,7 @@ Cell World::getCell(int worldX, int y, int worldZ, int s) const {
     return chunk->getCell(localX, y, localZ, s);
 }
 
-void World::setCell(int worldX, int y, int worldZ, int s, Cell cell) {
+void World::setCell(int worldX, int y, int worldZ, int s, Cell cell, bool notifyFluid) {
     ChunkCoord coord = worldToChunk(worldX, worldZ);
     {
         std::unique_lock<std::shared_mutex> lock(m_chunksMutex);
@@ -542,6 +545,10 @@ void World::setCell(int worldX, int y, int worldZ, int s, Cell cell) {
                 return glm::distance(p, torchWorldPos) < 0.1f;
             }), m_placedTorches.end());
         }
+    }
+
+    if (notifyFluid) {
+        m_waterSimulator.onBlockChanged(*this, worldX, y, worldZ, s);
     }
 }
 

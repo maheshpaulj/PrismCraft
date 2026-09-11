@@ -118,7 +118,8 @@ void Input::cursorPosCallback(GLFWwindow* window, double xpos, double ypos) {
         s_firstMouse = false;
     }
 
-    s_mouseDelta = {x - s_lastMousePos.x, y - s_lastMousePos.y};
+    s_mouseDelta.x += (x - s_lastMousePos.x);
+    s_mouseDelta.y += (y - s_lastMousePos.y);
     s_lastMousePos = {x, y};
     s_mousePos = {x, y};
 }

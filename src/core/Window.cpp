@@ -129,7 +129,9 @@ int Window::getRefreshRate() const {
 }
 
 void Window::framebufferResizeCallback(GLFWwindow* window, int width, int height) {
+    if (width <= 0 || height <= 0) return;
     auto app = reinterpret_cast<Window*>(glfwGetWindowUserPointer(window));
+    if (app->m_width == width && app->m_height == height) return;
     app->m_width = width;
     app->m_height = height;
     app->m_framebufferResized = true;

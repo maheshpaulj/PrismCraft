@@ -104,10 +104,10 @@ bool CommandQueue::endFrame(Swapchain& swapchain, uint32_t imageIndex) {
 
     VkResult result = vkQueuePresentKHR(m_context.getPresentQueue(), &presentInfo);
 
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         m_currentFrame = (m_currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
         return false;
-    } else if (result != VK_SUCCESS) {
+    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
         throw std::runtime_error("Failed to present swapchain image!");
     }
 

@@ -105,10 +105,10 @@ void main() {
         // Gentle shadow lift to prevent crushed blacks in foliage and caves
         tonemapped = max(tonemapped, vec3(0.006, 0.009, 0.015));
 
-        // Subtle daylight warmth in highlights, cool shadows
+        // Minecraft Vibrant Visuals: rich saturated colors with warm solar highlights
         float luma = dot(tonemapped, vec3(0.2126, 0.7152, 0.0722));
-        vec3 vibranceBoost = mix(vec3(luma), tonemapped, 1.05);
-        vec3 warmTint = vec3(1.02, 1.01, 0.985);
+        vec3 vibranceBoost = mix(vec3(luma), tonemapped, 1.14);
+        vec3 warmTint = vec3(1.03, 1.015, 0.97);
         tonemapped = mix(vibranceBoost, vibranceBoost * warmTint, clamp(luma * 0.6, 0.0, 1.0));
     }
 

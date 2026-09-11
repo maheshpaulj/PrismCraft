@@ -28,7 +28,6 @@ struct GameOptions {
     bool playerShadow = true;      // Steve's shadow on ground
     int waterQuality = 2;          // 0: Fast, 1: Fancy, 2: RTX
     int colorGrading = 1;          // 0: Off, 1: Cinematic, 2: Vibrant, 3: Warm, 4: Cool
-    int atmosphericFog = 1;        // 0: Off, 1: Subtle, 2: Dense
     bool torchColorBleed = true;   // Colored torchlight falloff & tinting
     bool smoothLighting = true;    // Smooth vertex AO lighting
     float aoStrength = 1.0f;       // Ambient occlusion intensity multiplier (0.0: Off, 1.0: Subtle Realistic, 1.4: Enhanced)

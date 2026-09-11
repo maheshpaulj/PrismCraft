@@ -26,6 +26,7 @@ public:
     [[nodiscard]] uint32_t getImageCount() const { return static_cast<uint32_t>(m_images.size()); }
     [[nodiscard]] VkImageView getImageView(uint32_t index) const { return m_imageViews[index]; }
     [[nodiscard]] VkImageView getDepthImageView() const { return m_depthImageView; }
+    [[nodiscard]] VkImage getDepthImage() const { return m_depthImage; }
 
     // Returns UINT32_MAX if swapchain needs recreation
     uint32_t acquireNextImage(VkSemaphore imageAvailableSemaphore);

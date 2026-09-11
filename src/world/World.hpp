@@ -3,6 +3,7 @@
 #include "world/ChunkMesher.hpp"
 #include "world/TerrainGen.hpp"
 #include "world/Coordinates.hpp"
+#include "world/WaterSimulator.hpp"
 #include "rhi/Buffer.hpp"
 #include <unordered_map>
 #include <memory>
@@ -45,15 +46,18 @@ public:
     ~World();
 
     // Call each frame with the player's position
-    void update(const glm::vec3& playerPos);
+    void update(const glm::vec3& playerPos, float dt = 0.016f);
     
     // Get all renderable chunk data
     [[nodiscard]] const std::unordered_map<ChunkCoord, ChunkRenderData, ChunkCoordHash>& getMeshes() const { return m_meshes; }
     
     // Get a cell at world coordinates
     [[nodiscard]] Cell getCell(int worldX, int y, int worldZ, int s) const;
-    void setCell(int worldX, int y, int worldZ, int s, Cell cell);
+    void setCell(int worldX, int y, int worldZ, int s, Cell cell, bool notifyFluid = true);
     void setCellInstant(int worldX, int y, int worldZ, int s, Cell cell);
+
+    // Water fluid simulation
+    [[nodiscard]] WaterSimulator& getWaterSimulator() { return m_waterSimulator; }
     
     // Physics / Gravity simulation for falling blocks (Sand, Gravel)
     void checkGravity(int worldX, int y, int worldZ, int s, FallingBlockManager* fallingBlocks = nullptr);
@@ -109,6 +113,7 @@ private:
     std::vector<glm::vec3> m_placedTorches;
 
     ThreadPool m_threadPool;
+    WaterSimulator m_waterSimulator;
 };
 
 } // namespace prismcraft

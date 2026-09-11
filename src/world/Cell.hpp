@@ -44,7 +44,20 @@ enum class BlockType : uint8_t {
 
 struct Cell {
     BlockType type = BlockType::Air;
-    
+    uint8_t level = 0; // 0 = source block / standard, 1..7 = flowing water distance
+
+    [[nodiscard]] bool isWater() const {
+        return type == BlockType::Water;
+    }
+
+    [[nodiscard]] bool isWaterSource() const {
+        return type == BlockType::Water && level == 0;
+    }
+
+    [[nodiscard]] bool isFlowingWater() const {
+        return type == BlockType::Water && level > 0;
+    }
+
     [[nodiscard]] bool isTorch() const {
         return type == BlockType::Torch;
     }

@@ -38,6 +38,16 @@ struct CellCoord {
     }
 };
 
+struct CellCoordHash {
+    size_t operator()(const CellCoord& c) const {
+        size_t h1 = std::hash<int>{}(c.x);
+        size_t h2 = std::hash<int>{}(c.y);
+        size_t h3 = std::hash<int>{}(c.z);
+        size_t h4 = std::hash<int>{}(c.s);
+        return h1 ^ (h2 << 11) ^ (h3 << 22) ^ (h4 << 29);
+    }
+};
+
 // Chunk coordinate (horizontal only, chunks are full-height columns)
 struct ChunkCoord {
     int cx, cz;
