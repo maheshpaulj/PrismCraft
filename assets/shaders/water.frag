@@ -207,10 +207,7 @@ vec4 traceSSR(vec3 rayOrigin, vec3 rayDir, vec2 waveGrad) {
             continue;
         }
 
-        vec2 uv = vec2(
-            (clip.x / clip.w) * 0.5 + 0.5,
-            1.0 - ((clip.y / clip.w) * 0.5 + 0.5)
-        );
+        vec2 uv = (clip.xy / clip.w) * 0.5 + 0.5;
         float rayLinearDepth = clip.w;
 
         // Stop if ray exits screen bounds
@@ -244,10 +241,7 @@ vec4 traceSSR(vec3 rayOrigin, vec3 rayDir, vec2 waveGrad) {
                 vec3 pMid = rayOrigin + marchDir * tMid;
                 vec4 cMid = pc.mvp * vec4(pMid, 1.0);
                 if (cMid.w > 0.05) {
-                    vec2 uvMid = vec2(
-                        (cMid.x / cMid.w) * 0.5 + 0.5,
-                        1.0 - ((cMid.y / cMid.w) * 0.5 + 0.5)
-                    );
+                    vec2 uvMid = (cMid.xy / cMid.w) * 0.5 + 0.5;
                     float sDepth = linearizeDepth(texture(depthSampler, uvMid).r);
                     if (cMid.w >= sDepth) {
                         t1 = tMid;
@@ -270,11 +264,11 @@ vec4 traceSSR(vec3 rayOrigin, vec3 rayDir, vec2 waveGrad) {
         return vec4(0.0);
     }
 
-    // Screen edge vignetting: smooth falloff at viewport borders (very tight 3.5% border so reflections cover nearly full screen width)
-    float edgeFade = smoothstep(0.001, 0.035, hitUV.x) *
-                     smoothstep(0.001, 0.035, 1.0 - hitUV.x) *
-                     smoothstep(0.001, 0.035, hitUV.y) *
-                     smoothstep(0.001, 0.035, 1.0 - hitUV.y);
+    // Screen edge vignetting: tight 1.5% falloff so reflections reach right to the borders
+    float edgeFade = smoothstep(0.0, 0.015, hitUV.x) *
+                     smoothstep(0.0, 0.015, 1.0 - hitUV.x) *
+                     smoothstep(0.0, 0.015, hitUV.y) *
+                     smoothstep(0.0, 0.015, 1.0 - hitUV.y);
 
     // Distance fade as ray approaches maximum reach
     float distFade = 1.0 - smoothstep(maxDist * 0.65, maxDist, t);
@@ -297,20 +291,20 @@ vec3 getReflectionColor(vec3 origin, vec3 R, vec3 L, float isDay, float sunInten
     float goldenHour = smoothstep(0.40, 0.02, pc.dayInfo.y) * step(-0.06, pc.dayInfo.y);
     vec3 sky = computeProceduralSky(R, L, isDay, sunIntensity, goldenHour);
 
-    // 1. Procedural 3D volumetric cumulus clouds (off-screen fallback)
+    // 1. Procedural 3D volumetric cumulus clouds (high-contrast, puffy clouds for off-screen reflections and looking down)
     if (R.y > 0.015 && waterQuality >= 1) {
-        float tCloud = (195.0 - origin.y) / max(R.y, 0.02);
-        if (tCloud > 0.0 && tCloud < 5000.0) {
+        float tCloud = (196.0 - origin.y) / max(R.y, 0.02);
+        if (tCloud > 0.0 && tCloud < 6000.0) {
             vec3 pCloud = origin + R * tCloud;
-            vec2 wind = vec2(pc.camPos.w * 3.6, pc.camPos.w * 1.4);
+            vec2 wind = vec2(pc.camPos.w * 4.2, pc.camPos.w * 1.6);
             vec2 ws = pCloud.xz + wind;
 
-            float macroNoise = cloudFBM(vec3(ws * 0.00040, 0.5));
-            if (macroNoise > 0.30) {
-                float cDensity = smoothstep(0.30, 0.55, macroNoise);
-                float cAlpha = clamp(cDensity * 1.6, 0.0, 0.92);
-                float silver = pow(max(dot(R, L) * 0.5 + 0.5, 0.0), 3.0) * 0.55 + 0.85;
-                vec3 goldenCloud = mix(vec3(1.35, 1.30, 1.20), vec3(2.0, 1.35, 0.65), goldenHour);
+            float macroNoise = cloudFBM(vec3(ws * 0.00028, 0.5));
+            if (macroNoise > 0.22) {
+                float cDensity = smoothstep(0.22, 0.48, macroNoise);
+                float cAlpha = clamp(cDensity * 2.0, 0.0, 0.96);
+                float silver = pow(max(dot(R, L) * 0.5 + 0.5, 0.0), 3.0) * 0.70 + 0.85;
+                vec3 goldenCloud = mix(vec3(1.50, 1.45, 1.35), vec3(2.35, 1.55, 0.75), goldenHour);
                 vec3 cloudLit = mix(vec3(0.25, 0.30, 0.42), goldenCloud * silver, isDay);
                 sky = mix(sky, cloudLit, cAlpha);
             }
@@ -322,19 +316,16 @@ vec3 getReflectionColor(vec3 origin, vec3 R, vec3 L, float isDay, float sunInten
     if (R.y > 0.015 && waterQuality >= 1) {
         vec4 skyClip = pc.mvp * vec4(origin + R * 400.0, 1.0);
         if (skyClip.w > 0.05) {
-            vec2 skyUV = vec2(
-                (skyClip.x / skyClip.w) * 0.5 + 0.5,
-                1.0 - ((skyClip.y / skyClip.w) * 0.5 + 0.5)
-            );
-            if (skyUV.x >= 0.002 && skyUV.x <= 0.998 && skyUV.y >= 0.002 && skyUV.y <= 0.998) {
+            vec2 skyUV = (skyClip.xy / skyClip.w) * 0.5 + 0.5;
+            if (skyUV.x >= 0.001 && skyUV.x <= 0.999 && skyUV.y >= 0.001 && skyUV.y <= 0.999) {
                 float skyDepth = texture(depthSampler, skyUV).r;
                 // Since clouds render with depthWrite = false, sky pixels (including 3D clouds) have depth >= 0.999
                 if (skyDepth >= 0.999) {
                     vec3 onScreenSky = texture(ssrSampler, skyUV).rgb;
-                    float skyEdgeFade = smoothstep(0.002, 0.04, skyUV.x) *
-                                        smoothstep(0.002, 0.04, 1.0 - skyUV.x) *
-                                        smoothstep(0.002, 0.04, skyUV.y) *
-                                        smoothstep(0.002, 0.04, 1.0 - skyUV.y);
+                    float skyEdgeFade = smoothstep(0.0, 0.015, skyUV.x) *
+                                        smoothstep(0.0, 0.015, 1.0 - skyUV.x) *
+                                        smoothstep(0.0, 0.015, skyUV.y) *
+                                        smoothstep(0.0, 0.015, 1.0 - skyUV.y);
                     sky = mix(sky, onScreenSky, skyEdgeFade);
                 }
             }
@@ -519,61 +510,36 @@ void main() {
                      d3 * (cos(w3) * k3 * a3) * fadeDist) * 0.65;
 
     // -------------------------------------------------------------
-    // Two-Phase Animated Water Flow Mapping
+    // 3. Directional Flow Currents for Streams & Waterfalls
     // -------------------------------------------------------------
-    bool isTopFace = (abs(fragNormal.y) > 0.5);
+    bool isTopFace = (abs(fragNormal.y) > 0.7);
     vec2 flowDir = fragNormal.xz;
     float flowLen = length(flowDir);
-    bool isFlowing = isTopFace ? (flowLen > 0.02) : true;
+    bool isFlowing = (flowLen > 0.02);
 
-    vec2 flowVec;
-    vec2 baseFlowUV;
-    if (isTopFace) {
-        flowVec = isFlowing ? (normalize(flowDir) * 0.45) : vec2(0.04, 0.02);
-        baseFlowUV = fragWorldPos.xz * 0.5;
-    } else {
-        // Vertical waterfall flow down wall
-        flowVec = vec2(0.0, -0.65);
-        baseFlowUV = vec2(fragWorldPos.x + fragWorldPos.z, fragWorldPos.y) * 0.5;
+    if (isTopFace && isFlowing) {
+        vec2 fDir = normalize(flowDir);
+        float fPhase0 = fract(t * 1.3);
+        float fPhase1 = fract(t * 1.3 + 0.5);
+        float fW0 = 1.0 - abs(fPhase0 - 0.5) * 2.0;
+        float fW1 = 1.0 - abs(fPhase1 - 0.5) * 2.0;
+        float r0 = sin(dot(pos - fDir * fPhase0 * 1.6, fDir) * 4.5) * 0.04;
+        float r1 = sin(dot(pos - fDir * fPhase1 * 1.6, fDir) * 4.5) * 0.04;
+        waveGrad += fDir * (r0 * fW0 + r1 * fW1);
     }
 
-    float flowTime = pc.camPos.w * 0.45;
-    float phase0 = fract(flowTime);
-    float phase1 = fract(flowTime + 0.5);
-
-    // Triangle wave weights: smoothly fade between the two scrolling phases without popping
-    float flowWeight0 = 1.0 - abs(phase0 - 0.5) * 2.0;
-    float flowWeight1 = 1.0 - abs(phase1 - 0.5) * 2.0;
-
-    vec2 uvFlow0 = baseFlowUV - flowVec * phase0;
-    vec2 uvFlow1 = baseFlowUV - flowVec * phase1;
-
-    // Tile 14 (Water Still) in TextureAtlas (256x512, tile at col 14, row 0)
-    vec2 tileUVMin = vec2(14.0 * 16.0 / 256.0, 0.0);
-    vec2 tileUVSize = vec2(16.0 / 256.0, 16.0 / 512.0);
-
-    vec2 atlasUV0 = tileUVMin + fract(uvFlow0) * tileUVSize;
-    vec2 atlasUV1 = tileUVMin + fract(uvFlow1) * tileUVSize;
-
-    vec3 waterTex0 = texture(texSampler, atlasUV0).rgb;
-    vec3 waterTex1 = texture(texSampler, atlasUV1).rgb;
-    vec3 blendedWaterTex = waterTex0 * flowWeight0 + waterTex1 * flowWeight1;
-
-    // Modulate waterBedColor with authentic Minecraft water pixel texture and flowing currents
-    vec3 texModulation = mix(vec3(1.0), blendedWaterTex * 1.5 + 0.1, 0.28);
+    // Authentic Minecraft water texture tint from texture atlas
+    vec3 waterTex = texture(texSampler, fragTexCoord).rgb;
+    vec3 texModulation = mix(vec3(1.0), waterTex * 1.35 + 0.12, 0.22);
     waterBedColor *= texModulation;
 
-    // Add flowing directional ripples to wave gradient when flowing
-    if (isFlowing) {
-        float flowWave0 = sin(dot(uvFlow0 * 3.5, vec2(1.1, 0.9))) * cos(dot(uvFlow0 * 3.5, vec2(-0.9, 1.1)));
-        float flowWave1 = sin(dot(uvFlow1 * 3.5, vec2(1.1, 0.9))) * cos(dot(uvFlow1 * 3.5, vec2(-0.9, 1.1)));
-        float flowWave = flowWave0 * flowWeight0 + flowWave1 * flowWeight1;
-        waveGrad += flowVec * (flowWave * 0.05);
-    }
-
     vec3 N = normalize(fragNormal);
-    if (abs(N.y) > 0.5) {
+    if (isTopFace) {
         N = normalize(vec3(-waveGrad.x, (N.y > 0.0 ? 1.0 : -1.0), -waveGrad.y));
+    } else {
+        // Lateral water wall (waterfalls / edge drops): downward water ripple
+        float downRipple = sin((fragWorldPos.y + t * 2.5) * 6.0) * 0.05;
+        N = normalize(vec3(fragNormal.x, downRipple, fragNormal.z));
     }
 
     vec3 effN = viewingFromBelow ? -N : N;
@@ -600,8 +566,9 @@ void main() {
         // -------------------------------------------------------------
         // ABOVE WATER VIEW: Physical Schlick Fresnel & GGX Sun Reflection
         // -------------------------------------------------------------
-        const float F0 = 0.08;
-        float fresnel = F0 + (1.0 - F0) * pow(clamp(1.0 - NdotV, 0.0, 1.0), 3.5);
+        // Generous base reflection so clouds and sky reflection NEVER vanish when looking straight down!
+        const float F0 = 0.38;
+        float fresnel = F0 + (1.0 - F0) * pow(clamp(1.0 - NdotV, 0.0, 1.0), 2.8);
 
         // Trace screen-space planar reflection (trees, hills, shoreline, clouds)
         vec3 R = reflect(-V, effN);
@@ -611,7 +578,7 @@ void main() {
         vec3 H = normalize(L + V);
         float goldenHour = smoothstep(0.40, 0.02, pc.dayInfo.y) * step(-0.06, pc.dayInfo.y);
 
-        float roughness = 0.058; // Smooth liquid surface for crisp, glistening sun reflections
+        float roughness = 0.052; // Smooth liquid surface for crisp, glistening sun reflections
         float D = DistributionGGX(effN, H, roughness);
         float G = GeometrySmith(effN, V, L, roughness);
         float F_sun = 0.04 + 0.96 * pow(1.0 - max(dot(V, H), 0.0), 5.0);
@@ -636,13 +603,11 @@ void main() {
         float foam = foamEdge * smoothstep(0.42, 0.85, foamWave) * isDay;
         vec3 foamColor = vec3(0.92, 0.96, 1.0) * (foam * 0.40);
 
-        // Composite water radiance with proper transmission/reflection blending:
-        finalAlpha = clamp(baseAlpha + fresnel * (1.0 - baseAlpha) + foam * 0.30, 0.18, 0.96);
-
-        // Cap reflection weight so deep oceanic blue water color ALWAYS shows through!
-        // Prevents the water from ever washing out into a flat gray/white sheet.
-        float reflWeight = clamp(fresnel * 0.70, 0.08, 0.65);
+        // Composite water radiance:
+        // Reflection weight starts at 38% looking straight down, ramping up to 92% at horizon
+        float reflWeight = clamp(fresnel, 0.38, 0.92);
         waterSurfaceColor = mix(waterBedColor, reflectedScene, reflWeight) + sunGlint + foamColor + sssColor;
+        finalAlpha = clamp(baseAlpha + fresnel * (1.0 - baseAlpha) + foam * 0.30, 0.25, 0.96);
     }
 
 

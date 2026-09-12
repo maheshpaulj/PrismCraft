@@ -28,9 +28,9 @@ layout(location = 3) out vec3 fragWorldPos;
 void main() {
     vec3 worldPos = inPosition;
 
-    // Physical vertex wave displacement for top water surfaces
+    // Physical vertex wave displacement for top water surfaces and wall top rims
     // Synchronized 1:1 with wave normals in water.frag
-    if (inNormal.y > 0.5) {
+    if (inNormal.y > 0.2) {
         float t = pc.camPos.w * 0.95;
         vec2 p = inPosition.xz;
 

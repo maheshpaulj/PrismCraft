@@ -94,6 +94,22 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
         mesh.waterIndices.push_back(baseIdx + 0);
     };
 
+    auto addWaterWallQuad = [&](const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2, const glm::vec3& v3,
+                                const glm::vec4& uv, const glm::vec3& normBot, const glm::vec3& normTop,
+                                const glm::vec3& c0, const glm::vec3& c1, const glm::vec3& c2, const glm::vec3& c3) {
+        uint32_t baseIdx = static_cast<uint32_t>(mesh.waterVertices.size());
+        mesh.waterVertices.push_back({v0, glm::vec2(uv.x, uv.w), normBot, c0});
+        mesh.waterVertices.push_back({v1, glm::vec2(uv.x, uv.y), normTop, c1});
+        mesh.waterVertices.push_back({v2, glm::vec2(uv.z, uv.y), normTop, c2});
+        mesh.waterVertices.push_back({v3, glm::vec2(uv.z, uv.w), normBot, c3});
+        mesh.waterIndices.push_back(baseIdx + 0);
+        mesh.waterIndices.push_back(baseIdx + 1);
+        mesh.waterIndices.push_back(baseIdx + 2);
+        mesh.waterIndices.push_back(baseIdx + 2);
+        mesh.waterIndices.push_back(baseIdx + 3);
+        mesh.waterIndices.push_back(baseIdx + 0);
+    };
+
     auto addWaterTri = [&](const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
                            const glm::vec2& uv0, const glm::vec2& uv1, const glm::vec2& uv2,
                            const glm::vec3& normal,
@@ -387,6 +403,11 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
 
                     // Directional horizontal flow vector for water column
                     auto getWaterFlowVector = [&](int cx, int cy, int cz, int cs, const Cell& curCell) -> glm::vec2 {
+                        // Still water sources (level == 0) never flow
+                        if (curCell.level == 0) {
+                            return glm::vec2(0.0f);
+                        }
+
                         CellCoord nbrs[5];
                         getNeighbors(cx, cy, cz, cs, nbrs);
 
@@ -408,15 +429,14 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                             Cell nBelow = getCellAtWorld(nc.x, nc.y - 1, nc.z, nc.s);
 
                             float weight = 0.0f;
-                            if (nCell.type == BlockType::Air || nCell.type == BlockType::Water) {
-                                if (nBelow.type == BlockType::Air || nBelow.type == BlockType::Water) {
-                                    weight = 4.0f; // Drop / waterfall
-                                } else if (nCell.type == BlockType::Water) {
-                                    int diff = static_cast<int>(nCell.level) - static_cast<int>(curCell.level);
-                                    weight = static_cast<float>(diff);
-                                } else if (nCell.type == BlockType::Air) {
-                                    weight = 2.0f;
+                            if (nCell.type == BlockType::Air) {
+                                if (nBelow.type == BlockType::Air) {
+                                    weight = 4.0f; // Waterfall cliff drop into open air
+                                } else {
+                                    weight = 2.0f; // Spreading onto flat ground
                                 }
+                            } else if (nCell.type == BlockType::Water && nCell.level > curCell.level) {
+                                weight = static_cast<float>(nCell.level - curCell.level);
                             }
                             flow += wallDirs[i] * weight;
                         }
@@ -458,22 +478,16 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                             glm::vec3 waterCol2(d2, sun2, t2);
 
                             // Solid, deterministic water height: 0.90 for source, flowing water drops by level
-                            // Perfectly shared across adjacent prisms to eliminate any triangular holes/cracks
                             float waterHeight = (cell.level == 0) ? 0.90f : std::max(0.20f, 0.90f - static_cast<float>(cell.level) * 0.10f);
                             glm::vec3 W0(vXZ[0].x, py + waterHeight, vXZ[0].y);
                             glm::vec3 W1(vXZ[1].x, py + waterHeight, vXZ[1].y);
                             glm::vec3 W2(vXZ[2].x, py + waterHeight, vXZ[2].y);
 
-                            // Continuous world-space UVs to prevent any block seams
-                            glm::vec2 uvW0 = glm::vec2(vXZ[0].x, vXZ[0].y) * 0.25f;
-                            glm::vec2 uvW1 = glm::vec2(vXZ[1].x, vXZ[1].y) * 0.25f;
-                            glm::vec2 uvW2 = glm::vec2(vXZ[2].x, vXZ[2].y) * 0.25f;
-
-                            // Flow vector passed via normal.xz
+                            // Flow vector passed via normal.xz (zero for still water, directional for flowing)
                             glm::vec2 flowVec = getWaterFlowVector(wx, y, wz, s, cell);
                             glm::vec3 nWaterTop(flowVec.x, 1.0f, flowVec.y);
 
-                            addWaterTri(W0, W2, W1, uvW0, uvW2, uvW1, nWaterTop, waterCol0, waterCol2, waterCol1);
+                            addWaterTri(W0, W2, W1, uvT0, uvT2, uvT1, nWaterTop, waterCol0, waterCol2, waterCol1);
                         } else {
                             bool isSubmerged = (n0.type == BlockType::Water);
                             float ao0 = getTopVertexAO(T0, y);
@@ -561,7 +575,8 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                             float topY = hasWaterAbove ? (py + 1.0f) : (py + waterHeight);
                             glm::vec3 wT0 = vT0; wT0.y = topY;
                             glm::vec3 wT1 = vT1; wT1.y = topY;
-                            addWaterQuad(vB0, wT0, wT1, vB1, uv, wallNorm, wc_B0, wc_T0, wc_T1, wc_B1);
+                            glm::vec3 normTop = hasWaterAbove ? wallNorm : glm::vec3(wallNorm.x, 0.5f, wallNorm.z);
+                            addWaterWallQuad(vB0, wT0, wT1, vB1, uv, wallNorm, normTop, wc_B0, wc_T0, wc_T1, wc_B1);
                         } else {
                             bool isSubmerged = (neighborCell.type == BlockType::Water);
                             glm::vec3 tang = glm::normalize(vB1 - vB0);
@@ -1054,9 +1069,9 @@ ChunkMesh ChunkMesher::generateImposterMesh(const ChunkCoord& coord, const Terra
                     getPrismVerticesXZ(wx, wz, s, vXZ);
 
                     float waterY = 44.0f;
-                    glm::vec3 T0(vXZ[0].x, waterY + 1.0f, vXZ[0].y);
-                    glm::vec3 T1(vXZ[1].x, waterY + 1.0f, vXZ[1].y);
-                    glm::vec3 T2(vXZ[2].x, waterY + 1.0f, vXZ[2].y);
+                    glm::vec3 T0(vXZ[0].x, waterY + 0.90f, vXZ[0].y);
+                    glm::vec3 T1(vXZ[1].x, waterY + 0.90f, vXZ[1].y);
+                    glm::vec3 T2(vXZ[2].x, waterY + 0.90f, vXZ[2].y);
 
                     glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(BlockType::Water, 0));
                     float uMid = uv.x + (uv.z - uv.x) * 0.5f;
