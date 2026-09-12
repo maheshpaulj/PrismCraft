@@ -10,8 +10,9 @@ namespace prismcraft {
 class VulkanContext;
 
 struct PostProcessPushConstants {
-    glm::vec4 params;  // x = exposure, y = vibrance, z = bloomStrength, w = time
-    glm::vec4 options; // x = vibrantVisuals (1.0 or 0.0), y = sharpening (0.12), z = colorGrading, w = reserved
+    glm::vec4 params;   // x = exposure, y = vibrance, z = bloomStrength, w = time
+    glm::vec4 options;  // x = vibrantVisuals (1.0 or 0.0), y = sharpening (0.12), z = colorGrading, w = isUnderwater
+    glm::vec4 sunData;  // x = sunScreenU, y = sunScreenV, z = sunIntensity*isDay, w = sunHeight
 };
 
 class PostProcessRenderer {
@@ -35,7 +36,9 @@ public:
 
     void renderQuad(VkCommandBuffer cmd, VkExtent2D extent,
                     float exposure, float vibrance, float bloomStrength, float time,
-                    bool vibrantVisuals, float sharpening = 0.0f, float isUnderwater = 0.0f);
+                    bool vibrantVisuals, float sharpening = 0.0f, float isUnderwater = 0.0f,
+                    float sunScreenU = 0.5f, float sunScreenV = 0.5f,
+                    float sunIntensity = 0.0f, float sunHeight = 0.0f);
 
     void copyHDRToSSR(VkCommandBuffer cmd, VkImage sceneDepthImage = VK_NULL_HANDLE);
 

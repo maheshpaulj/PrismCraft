@@ -7,7 +7,8 @@ layout(binding = 0) uniform sampler2D hdrSceneTexture;
 
 layout(push_constant) uniform PushConstants {
     vec4 params;  // x = exposure, y = vibrance, z = bloomStrength, w = time
-    vec4 options; // x = vibrantVisuals (1.0 or 0.0), y = sharpening (0.12), z = colorGrading, w = reserved
+    vec4 options; // x = vibrantVisuals (1.0 or 0.0), y = sharpening (0.12), z = colorGrading, w = isUnderwater
+    vec4 sunData; // x = sunScreenU, y = sunScreenV, z = sunIntensity*isDay, w = sunHeight
 } pc;
 
 // ACES Hill / Narkowicz Fitted Filmic Tonemapper (AP0 -> AP1 -> ACES curve -> sRGB)
@@ -47,8 +48,8 @@ vec3 triangularDither(vec3 color, vec2 uv) {
 // Soft-knee threshold extraction for subtle highlight bloom (sun disc, glowing torches, water glints)
 vec3 extractBloom(vec3 c) {
     float brightness = max(c.r, max(c.g, c.b));
-    const float threshold = 1.65;
-    const float knee = 0.40;
+    const float threshold = 1.45;
+    const float knee = 0.45;
     float soft = brightness - threshold + knee;
     soft = clamp(soft, 0.0, 2.0 * knee);
     soft = soft * soft / (4.0 * knee + 0.00001);
@@ -106,8 +107,57 @@ void main() {
     }
 
     // Composite linear radiance with restrained bloom (zero sharpening artifacts on pixel art)
-    float bloomWeight = (pc.params.z > 0.0) ? pc.params.z : 0.05;
+    float bloomWeight = (pc.params.z > 0.0) ? pc.params.z : 0.065;
     vec3 sceneRadiance = centerHdr + bloom * bloomWeight;
+
+    // -------------------------------------------------------------
+    // 2. Volumetric Screen-Space Sun Shafts / God Rays (Radial Light Blur)
+    // -------------------------------------------------------------
+    if (pc.sunData.z > 0.01) {
+        vec2 sunUV = pc.sunData.xy;
+        vec2 deltaUV = (sampleUV - sunUV);
+        float distToSun = length(deltaUV);
+
+        // 16 samples per pixel as configured for clean quality and high performance
+        const int NUM_RAYS = 16;
+        vec2 stepVec = deltaUV * (1.0 / float(NUM_RAYS));
+
+        // Interleaved pseudo-random jitter to eliminate radial stepping bands
+        float jitter = fract(sin(dot(sampleUV, vec2(12.9898, 78.233)) + pc.params.w * 0.1) * 43758.5453);
+
+        vec3 godRayAccum = vec3(0.0);
+        float rayWeight = 1.0;
+        float totalWeight = 0.0001;
+
+        for (int i = 0; i < NUM_RAYS; ++i) {
+            vec2 marchUV = sampleUV - stepVec * (float(i) + jitter * 0.75);
+            vec3 s = texture(hdrSceneTexture, clamp(marchUV, 0.001, 0.999)).rgb;
+
+            // Extract high-luminance sky / cloud / sun disc pixels; occlude dark foliage/terrain
+            float luma = max(s.r, max(s.g, s.b));
+            float mask = smoothstep(0.85, 2.0, luma);
+
+            godRayAccum += s * mask * rayWeight;
+            totalWeight += rayWeight;
+            rayWeight *= 0.88; // Physical exponential decay along light path (no circular boundary)
+        }
+
+        godRayAccum /= totalWeight;
+
+        // Dynamic warm sunbeam tint: warm daylight -> rich fiery golden-amber at sunset
+        float goldenHour = smoothstep(0.40, 0.02, pc.sunData.w) * step(-0.06, pc.sunData.w);
+        vec3 rayColor = mix(vec3(1.02, 0.96, 0.88), vec3(1.15, 0.78, 0.38), goldenHour);
+
+        // Soft screen border vignette so rays don't abruptly clip at viewport edges
+        float borderFade = smoothstep(0.0, 0.06, sampleUV.x) * smoothstep(1.0, 0.94, sampleUV.x) *
+                           smoothstep(0.0, 0.06, sampleUV.y) * smoothstep(1.0, 0.94, sampleUV.y);
+
+        // Gentle central fade directly at sun center
+        float centerFade = smoothstep(0.015, 0.08, distToSun);
+
+        float godRayStrength = 0.18 * pc.sunData.z * borderFade * centerFade;
+        sceneRadiance += godRayAccum * rayColor * godRayStrength;
+    }
 
     // -------------------------------------------------------------
     // 3. Controlled Exposure & ACES Filmic Tone Mapping
@@ -120,13 +170,16 @@ void main() {
     // -------------------------------------------------------------
     if (isVibrant) {
         // Gentle shadow lift to prevent crushed blacks in foliage and caves
-        tonemapped = max(tonemapped, vec3(0.006, 0.009, 0.015));
+        tonemapped = max(tonemapped, vec3(0.008, 0.012, 0.020));
 
-        // Minecraft Vibrant Visuals: rich saturated colors with warm solar highlights
+        // Balanced Film Vibrance: calm, natural saturation without radioactive colors
         float luma = dot(tonemapped, vec3(0.2126, 0.7152, 0.0722));
-        vec3 vibranceBoost = mix(vec3(luma), tonemapped, 1.15);
-        vec3 warmTint = vec3(1.035, 1.015, 0.965);
-        tonemapped = mix(vibranceBoost, vibranceBoost * warmTint, clamp(luma * 0.7, 0.0, 1.0));
+        vec3 vibranceBoost = mix(vec3(luma), tonemapped, 0.96);
+
+        // Subtle solar warmth curve: gentle golden-amber highlight response at low sun angles
+        float goldenHour = smoothstep(0.40, 0.02, pc.sunData.w) * step(-0.06, pc.sunData.w);
+        vec3 warmTint = mix(vec3(1.01, 1.005, 0.985), vec3(1.04, 1.015, 0.95), goldenHour);
+        tonemapped = mix(vibranceBoost, vibranceBoost * warmTint, clamp(luma * 0.50, 0.0, 1.0));
     }
 
     // -------------------------------------------------------------

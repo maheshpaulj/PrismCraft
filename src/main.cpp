@@ -645,8 +645,8 @@ void run() {
         float sunIntensity = std::clamp((sunHeight + 0.15f) / 0.65f, 0.0f, 1.0f);
 
         // Dynamic atmospheric horizon sky color (calibrated to the linear horizon in sky.frag)
-        glm::vec3 daySky(0.78f, 0.86f, 0.94f);      // Soft luminous atmospheric horizon sky blue
-        glm::vec3 duskSky(0.98f, 0.74f, 0.50f);     // Warm golden-peach horizon
+        glm::vec3 daySky(0.80f, 0.85f, 0.92f);      // Slightly warmer luminous atmospheric horizon sky
+        glm::vec3 duskSky(1.00f, 0.76f, 0.44f);     // Intense golden-amber horizon
         glm::vec3 nightSky(0.13f, 0.15f, 0.22f);    // Soft atmospheric indigo night horizon
 
         glm::vec3 skyColor;
@@ -666,7 +666,7 @@ void run() {
             skyColor = glm::vec3(0.012f, 0.065f, 0.110f); // Deep oceanic slate-blue underwater fog
         }
         float maxVisibleDist = static_cast<float>(world->renderDistance * 16);
-        float fogDistance = isUnderwater ? 24.0f : (maxVisibleDist * 0.92f);
+        float fogDistance = isUnderwater ? 16.0f : (maxVisibleDist * 0.92f);
 
         // -------------------------------------------------------------
         // State-Specific Logic & Input Handling
@@ -975,6 +975,7 @@ void run() {
                     world = std::make_unique<World>(context, commandQueue, currentSeed);
                     world->renderDistance = options.renderDistance;
                     world->lodPreset = options.lodPreset;
+                    player.resetToStarterInventory();
                     state = GameState::LoadingWorld;
                     loadingProgress = 0.0f;
                     loadingLoadedChunks = 0;
@@ -1664,10 +1665,30 @@ void run() {
 
         vkCmdBeginRendering(cmd, &swapchainRenderInfo);
 
+        // Compute Sun Screen UV for Volumetric God Rays in Post-Processing
+        float sunScreenU = 0.5f;
+        float sunScreenV = 0.5f;
+        float godRaySunIntensity = 0.0f;
+        glm::vec3 camForward = (state == GameState::Playing) ? player.getCamera().getForward() : glm::normalize(glm::vec3(0.0f, 65.0f, 0.0f) - camPos);
+        float sunDotForward = glm::dot(sunDir, camForward);
+        // God rays occur selectively at lower sun angles (sunrise, morning, afternoon, sunset, golden hour)
+        // and when looking generally towards the sun. At high noon, god rays subside.
+        float sunElevationWeight = std::clamp((0.48f - sunHeight) / 0.28f, 0.0f, 1.0f) * std::clamp((sunHeight + 0.06f) / 0.16f, 0.0f, 1.0f);
+        if (options.vibrantVisuals && !isUnderwater && sunDotForward > 0.15f && sunElevationWeight > 0.01f && sunIntensity > 0.01f) {
+            glm::vec4 sunClip = vp * glm::vec4(camPos + sunDir * 500.0f, 1.0f);
+            if (sunClip.w > 0.1f) {
+                sunScreenU = (sunClip.x / sunClip.w) * 0.5f + 0.5f;
+                sunScreenV = 1.0f - ((sunClip.y / sunClip.w) * 0.5f + 0.5f);
+                float forwardFade = std::clamp((sunDotForward - 0.15f) / 0.35f, 0.0f, 1.0f);
+                godRaySunIntensity = sunIntensity * dayFactor * forwardFade * sunElevationWeight;
+            }
+        }
+
         // 1. Tonemap & Composite 3D Scene into Swapchain
         postProcessRenderer.renderQuad(cmd, swapchain.getExtent(),
                                        options.exposure, 1.0f, 0.05f, timer.getElapsedTime(),
-                                       options.vibrantVisuals, 0.0f, isUnderwater ? 1.0f : 0.0f);
+                                       options.vibrantVisuals, 0.0f, isUnderwater ? 1.0f : 0.0f,
+                                       sunScreenU, sunScreenV, godRaySunIntensity, sunHeight);
 
         // 2. Crisp 2D UI & Menus Overlay on top
         VkViewport uiViewport{};

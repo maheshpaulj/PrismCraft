@@ -25,6 +25,11 @@ float interleavedGradientNoise(vec2 screenPos) {
     return fract(52.9829189 * fract(0.06711056 * screenPos.x + 0.00583715 * screenPos.y));
 }
 
+// Accurate sRGB to Linear helper
+vec3 srgbToLinear(vec3 c) {
+    return pow(clamp(c, 0.0, 1.0), vec3(2.2));
+}
+
 // Accurate piecewise Linear to sRGB OETF
 vec3 linearToSrgb(vec3 c) {
     bvec3 cutoff = lessThanEqual(c, vec3(0.0031308));
@@ -66,21 +71,30 @@ void main() {
     float sunHeight = pc.dayInfo.y;
     float sunIntensity = abs(pc.sunDir.w);
 
-    // Golden-hour factor: peaks when sun is at horizon angles
     float goldenHour = smoothstep(0.40, 0.02, sunHeight) * step(-0.06, sunHeight);
+
+    // Underwater Sky Background: Eliminate bright daytime sky dome when camera is submerged
+    bool cameraUnderwater = (pc.skyFog.w < 0.0);
+    if (cameraUnderwater) {
+        vec3 linearOcean = srgbToLinear(pc.skyFog.rgb);
+        float cosTheta = dot(V, L);
+        float forwardScatter = pow(max(cosTheta, 0.0), 3.5) * isDay * smoothstep(-0.1, 0.5, V.y);
+        vec3 oceanSky = linearOcean + vec3(0.04, 0.16, 0.22) * forwardScatter;
+        outColor = vec4(oceanSky, 1.0);
+        return;
+    }
 
     // -------------------------------------------------------------
     // 1. Physically-Calibrated Atmospheric Sky Palettes (Linear Space)
     // -------------------------------------------------------------
-    // Midday: Pure atmospheric azure blue at zenith -> soft luminous sky blue at horizon
-    // (Never oversaturated cyan, never washed out pure white)
-    vec3 zenithDay   = vec3(0.16, 0.40, 0.88);
-    vec3 horizonDay  = vec3(0.55, 0.70, 0.92);
+    // Midday: Rich deep atmospheric azure at zenith -> soft luminous sky blue at horizon
+    vec3 zenithDay   = vec3(0.14, 0.36, 0.85);
+    vec3 horizonDay  = vec3(0.60, 0.74, 0.90);
     vec3 groundDay   = vec3(0.24, 0.28, 0.22);
 
-    // Sunset / Golden Hour: Twilight indigo at zenith -> warm golden-peach at horizon
-    vec3 zenithDusk  = vec3(0.14, 0.16, 0.38);
-    vec3 horizonDusk = vec3(0.96, 0.52, 0.22);
+    // Sunset / Golden Hour: Deep twilight indigo at zenith -> intense fiery golden-amber at horizon
+    vec3 zenithDusk  = vec3(0.12, 0.14, 0.36);
+    vec3 horizonDusk = vec3(1.12, 0.58, 0.16);
     vec3 groundDusk  = vec3(0.20, 0.14, 0.10);
 
     // Night: Deep celestial navy at zenith -> subtle ambient indigo above horizon
@@ -119,9 +133,9 @@ void main() {
     // -------------------------------------------------------------
     float hazeDist = abs(V.y - 0.015);
     float hazeBand = exp(-hazeDist * 14.0);
-    vec3 hazeDay = mix(vec3(0.68, 0.78, 0.90), vec3(0.98, 0.65, 0.36), goldenHour);
+    vec3 hazeDay = mix(vec3(0.70, 0.80, 0.90), vec3(1.10, 0.68, 0.32), goldenHour);
     vec3 hazeColor = mix(vec3(0.014, 0.019, 0.032), hazeDay, isDay);
-    skyRgb = mix(skyRgb, hazeColor, hazeBand * 0.42);
+    skyRgb = mix(skyRgb, hazeColor, hazeBand * 0.52);
 
     // -------------------------------------------------------------
     // 4. Solar Influence (Forward Mie Scattering & Halo)
@@ -129,13 +143,13 @@ void main() {
     float cosTheta = dot(V, L);
 
     // A. Broad atmospheric solar warmth across the sun-facing hemisphere
-    float sunWarmth = pow(clamp(cosTheta * 0.5 + 0.5, 0.0, 1.0), 3.0) * 0.38;
-    vec3 warmthColor = mix(vec3(0.28, 0.25, 0.16), vec3(0.82, 0.46, 0.15), goldenHour);
+    float sunWarmth = pow(clamp(cosTheta * 0.5 + 0.5, 0.0, 1.0), 2.5) * 0.55;
+    vec3 warmthColor = mix(vec3(0.35, 0.30, 0.18), vec3(1.10, 0.60, 0.18), goldenHour);
     skyRgb += warmthColor * (sunWarmth * isDay);
 
     // B. Circumsolar corona / solar aureole around the sun disc
-    float corona = pow(clamp(cosTheta, 0.0, 1.0), 28.0) * 0.85 + pow(clamp(cosTheta, 0.0, 1.0), 180.0) * 2.5;
-    vec3 coronaColor = mix(vec3(1.8, 1.6, 1.2), vec3(3.2, 1.8, 0.6), goldenHour);
+    float corona = pow(clamp(cosTheta, 0.0, 1.0), 24.0) * 1.10 + pow(clamp(cosTheta, 0.0, 1.0), 160.0) * 3.5;
+    vec3 coronaColor = mix(vec3(2.2, 1.9, 1.4), vec3(4.2, 2.4, 0.8), goldenHour);
     skyRgb += coronaColor * (corona * isDay * sunIntensity);
 
     // C. Anti-solar horizon arch (Belt of Venus) opposite setting sun

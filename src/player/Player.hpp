@@ -85,6 +85,7 @@ public:
     void setFlying(bool f) { m_flying = f; }
     [[nodiscard]] float getEyeHeight() const { return m_eyeHeight; }
     void clearInventory();
+    void resetToStarterInventory();
 
     float mouseSensitivity = 1.0f;
 
@@ -130,38 +131,38 @@ private:
     bool m_drawingBow = false;
     bool m_blocking = false;
 
-    // Hotbar inventory (10 slots matching alternating triangular layout: slot 0 Grass 11, slot 1 Dirt 5)
+    // Hotbar inventory (10 slots matching alternating triangular layout: 32x Wood, 8x Torch, 64x Glass)
     std::array<BlockType, 10> m_hotbar{
-        BlockType::Grass,
-        BlockType::Dirt,
-        BlockType::TallGrass,
-        BlockType::Stone,
-        BlockType::CobbleStone,
         BlockType::Wood,
-        BlockType::Planks,
-        BlockType::Leaves,
-        BlockType::Sand,
-        BlockType::Glass
+        BlockType::Torch,
+        BlockType::Glass,
+        BlockType::Air,
+        BlockType::Air,
+        BlockType::Air,
+        BlockType::Air,
+        BlockType::Air,
+        BlockType::Air,
+        BlockType::Air
     };
-    std::array<int, 10> m_hotbarCounts{11, 5, 16, 32, 16, 8, 4, 20, 15, 7};
+    std::array<int, 10> m_hotbarCounts{32, 8, 64, 0, 0, 0, 0, 0, 0, 0};
     int m_selectedSlot = 0;
 
-    // Storage inventory (30 slots: 3 rows of 10 alternating equilateral triangular slots)
+    // Storage inventory (30 slots: empty by default for new world)
     std::array<BlockType, 30> m_storage{
-        BlockType::CraftingTable, BlockType::Furnace, BlockType::Torch, BlockType::Bookshelf, BlockType::Obsidian,
-        BlockType::Bed, BlockType::DoorWood, BlockType::Glowstone, BlockType::OreGold, BlockType::OreDiamond,
-        BlockType::OreRedstone, BlockType::OreEmerald, BlockType::BlockIron, BlockType::BlockGold, BlockType::BlockDiamond,
-        BlockType::StoneBricks, BlockType::Brick, BlockType::Cactus, BlockType::Pumpkin, BlockType::JackOLantern,
-        BlockType::Netherrack, BlockType::Sandstone, BlockType::WoolWhite, BlockType::Clay, BlockType::Melon,
-        BlockType::Wood, BlockType::Planks, BlockType::Stone, BlockType::Glass, BlockType::Ice
+        BlockType::Air, BlockType::Air, BlockType::Air, BlockType::Air, BlockType::Air,
+        BlockType::Air, BlockType::Air, BlockType::Air, BlockType::Air, BlockType::Air,
+        BlockType::Air, BlockType::Air, BlockType::Air, BlockType::Air, BlockType::Air,
+        BlockType::Air, BlockType::Air, BlockType::Air, BlockType::Air, BlockType::Air,
+        BlockType::Air, BlockType::Air, BlockType::Air, BlockType::Air, BlockType::Air,
+        BlockType::Air, BlockType::Air, BlockType::Air, BlockType::Air, BlockType::Air
     };
     std::array<int, 30> m_storageCounts{
-        4, 4, 32, 16, 16,
-        2, 4, 16, 12, 12,
-        24, 12, 8, 8, 8,
-        32, 32, 16, 8, 8,
-        32, 32, 16, 16, 8,
-        16, 32, 64, 16, 16
+        0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0
     };
 };
 

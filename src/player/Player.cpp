@@ -543,4 +543,15 @@ void Player::clearInventory() {
     m_storageCounts.fill(0);
 }
 
+void Player::resetToStarterInventory() {
+    clearInventory();
+    m_hotbar[0] = BlockType::Wood;
+    m_hotbarCounts[0] = 32;
+    m_hotbar[1] = BlockType::Torch;
+    m_hotbarCounts[1] = 8;
+    m_hotbar[2] = BlockType::Glass;
+    m_hotbarCounts[2] = 64;
+    m_selectedSlot = 0;
+}
+
 } // namespace prismcraft

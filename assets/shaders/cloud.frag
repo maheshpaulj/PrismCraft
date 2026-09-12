@@ -265,9 +265,9 @@ void main() {
 
     // Warm Solar Spectrum (Direct Sunlight)
     // Midday: warm solar white (~5500K, not sterile flat RGB white)
-    vec3 midDaySunColor = vec3(1.45, 1.38, 1.20);
+    vec3 midDaySunColor = vec3(1.50, 1.42, 1.15);
     // Sunset / Golden Hour: rich fiery amber-gold
-    vec3 sunsetSunColor = vec3(2.65, 1.45, 0.55);
+    vec3 sunsetSunColor = vec3(2.85, 1.55, 0.45);
     // Moon / Night: cool soft lunar silver
     vec3 nightSunColor  = vec3(0.35, 0.42, 0.65);
     vec3 sunColor = mix(midDaySunColor, sunsetSunColor, goldenHour);
@@ -275,12 +275,12 @@ void main() {
 
     // Dual-lobe Henyey-Greenstein phase function (silver lining + forward bloom)
     float cosTheta = dot(rayDir, L);
-    float g1 = 0.76;
-    float g2 = -0.20;
+    float g1 = 0.78;
+    float g2 = -0.22;
     float hg1 = (1.0 - g1 * g1) / pow(max(1.0 + g1 * g1 - 2.0 * g1 * cosTheta, 0.001), 1.5);
     float hg2 = (1.0 - g2 * g2) / pow(max(1.0 + g2 * g2 - 2.0 * g2 * cosTheta, 0.001), 1.5);
-    float silverLining = mix(hg1, hg2, 0.20) * 0.40 + 0.65;
-    float forwardGlow = pow(max(cosTheta * 0.5 + 0.5, 0.0), 3.8) * 1.8;
+    float silverLining = mix(hg1, hg2, 0.20) * 0.48 + 0.65;
+    float forwardGlow = pow(max(cosTheta * 0.5 + 0.5, 0.0), 3.5) * 2.2;
     vec3 litSurfaceColor = sunColor * (silverLining + forwardGlow);
 
     // -------------------------------------------------------------
@@ -294,8 +294,8 @@ void main() {
     vec3 activeZenithSky = mix(skyZenithBlue, sunsetZenithPurple, goldenHour);
 
     // Ground bounce & horizon warmth (bottom of clouds)
-    vec3 groundBounceMidday = vec3(0.30, 0.32, 0.30);
-    vec3 groundBounceSunset = vec3(0.52, 0.34, 0.20);
+    vec3 groundBounceMidday = vec3(0.32, 0.34, 0.30);
+    vec3 groundBounceSunset = vec3(0.60, 0.38, 0.18);
     vec3 activeGroundBounce = mix(groundBounceMidday, groundBounceSunset, goldenHour);
 
     // Limit maximum raymarch distance inside cloud slab
@@ -366,8 +366,8 @@ void main() {
     }
 
     // Crepuscular forward sun glow
-    float sunProximity = pow(max(cosTheta * 0.5 + 0.5, 0.0), 4.2);
-    vec3 crepuscularShafts = sunColor * (sunProximity * 1.4) * (0.35 + goldenHour * 0.65) * isDay;
+    float sunProximity = pow(max(cosTheta * 0.5 + 0.5, 0.0), 3.6);
+    vec3 crepuscularShafts = sunColor * (sunProximity * 1.8) * (0.35 + goldenHour * 0.65) * isDay;
     accumColor += crepuscularShafts * (1.0 - transmittance);
 
     float cloudAlpha = 1.0 - transmittance;
@@ -383,7 +383,7 @@ void main() {
     vec3 cloudRgb = accumColor / max(cloudAlpha, 0.0001);
 
     vec3 linearSkyFog = srgbToLinear(pc.skyFog.rgb);
-    vec3 goldenFog = mix(linearSkyFog, vec3(1.40, 1.05, 0.65), goldenHour * 0.45);
+    vec3 goldenFog = mix(linearSkyFog, vec3(1.60, 1.15, 0.55), goldenHour * 0.55);
     vec3 finalColor = mix(cloudRgb, goldenFog, fogFactor);
     float finalAlpha = cloudAlpha * (1.0 - fogFactor);
 

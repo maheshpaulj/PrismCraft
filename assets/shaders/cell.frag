@@ -285,8 +285,8 @@ vec3 applyHorizonDistanceFog(vec3 surfaceColor, vec3 fragPos, vec3 camPos, vec3 
     if (rayDist < 0.001) return surfaceColor;
     vec3 V = rayDir / rayDist;
 
-    // Horizon fade start: 70% of render distance (clean, crisp nearby world, smooth horizon edge fade)
-    float startRatio = 0.70;
+    // Horizon fade start: 55% of render distance for rich aerial perspective while keeping foreground crisp
+    float startRatio = 0.55;
     float fogStart = fogEndDist * startRatio;
 
     // Everything closer than fogStart has ZERO fog: 100% crisp, vibrant, high-contrast nearby world!
@@ -300,18 +300,31 @@ vec3 applyHorizonDistanceFog(vec3 surfaceColor, vec3 fragPos, vec3 camPos, vec3 
 
     // Directional In-Scattered Air-Light Color matching sky dome at horizon
     vec3 linearHorizonSky = srgbToLinear(skyFogColor);
-    vec3 zenithSky = linearHorizonSky * vec3(0.68, 0.84, 1.22);
+    vec3 zenithSky = linearHorizonSky * vec3(0.72, 0.86, 1.18);
     vec3 baseAirLight = mix(linearHorizonSky, zenithSky, clamp(V.y * 0.55 + 0.15, 0.0, 1.0));
 
-    // Smooth forward solar warming without any hard cone cutoff or circle artifacts
+    // Smooth forward solar warming with Henyey-Greenstein Mie forward scattering
     float cosTheta = dot(V, L);
-    if (cosTheta > 0.0 && isDay > 0.05) {
-        float forwardPhase = pow(cosTheta, 4.0) * 0.35;
-        vec3 goldenHaze = mix(vec3(1.10, 1.04, 0.95), vec3(1.65, 1.25, 0.70), goldenHour);
+    if (isDay > 0.05) {
+        // Broad forward scattering across the sun hemisphere + sharp circumsolar flare
+        float broadPhase = pow(max(cosTheta * 0.5 + 0.5, 0.0), 2.5) * 0.50;
+        float peakPhase  = pow(max(cosTheta, 0.0), 6.0) * 0.65;
+        float forwardPhase = (broadPhase + peakPhase);
+
+        vec3 goldenHaze = mix(vec3(1.18, 1.08, 0.92), vec3(1.95, 1.35, 0.55), goldenHour);
         baseAirLight = mix(baseAirLight, baseAirLight * goldenHaze, forwardPhase);
     }
 
-    return mix(surfaceColor, baseAirLight, fogFactor);
+    vec3 result = mix(surfaceColor, baseAirLight, fogFactor);
+
+    // Subtle forward solar aerial haze on distant geometry facing the sun (AAA shader pack look)
+    if (cosTheta > 0.0 && isDay > 0.05) {
+        float forwardHaze = pow(cosTheta, 2.0) * isDay * clamp(rayDist / (fogEndDist * 0.75), 0.0, 1.0);
+        vec3 forwardGlow = mix(vec3(0.12, 0.10, 0.06), vec3(0.45, 0.28, 0.10), goldenHour);
+        result += forwardGlow * (forwardHaze * 0.20);
+    }
+
+    return result;
 }
 
 
@@ -407,7 +420,7 @@ void main() {
         // Chlorophyll forward scattering & two-sided wrap diffuse backlight
         float sss = pow(clamp(dot(V, -L), 0.0, 1.0), 3.0);
         float leafWrap = clamp((dot(N, L) + 0.4) / 1.4, 0.0, 1.0);
-        vec3 chlorophyllTint = albedo * vec3(1.35, 1.55, 0.45);
+        vec3 chlorophyllTint = albedo * vec3(1.10, 1.18, 0.82);
         float foliageTransmission = (sss * 0.65 + leafWrap * 0.35) * combinedShadow * isDay * sunIntensity;
         foliageGlow = chlorophyllTint * foliageTransmission;
     }
@@ -541,14 +554,10 @@ void main() {
             linearSceneColor += godRayColor * (godRay * 0.32 * sunIntensity * (1.0 - exp(-dist * 0.18)));
         }
 
-        // 4. Procedural Floating Marine Snow / Micro-Plankton Specks
-        vec3 pCell = floor(fragWorldPos * 2.5);
-        float speckHash = fract(sin(dot(pCell, vec3(127.1, 311.7, 74.7))) * 43758.5453);
-        if (speckHash > 0.94 && dist < 16.0) {
-            float shimmer = sin(pc.camPos.w * 3.0 + speckHash * 6.28) * 0.5 + 0.5;
-            float speckAtten = 1.0 - dist / 16.0;
-            linearSceneColor += vec3(0.45, 0.75, 0.85) * (shimmer * speckAtten * 0.40 * isDay);
-        }
+        // 4. Complete oceanic fog extinction at fogEnd (16m) so chunks dissolve into the abyss seamlessly
+        float uFogFactor = smoothstep(fogEnd * 0.35, fogEnd, dist);
+        vec3 linearOceanFog = srgbToLinear(pc.skyFog.rgb);
+        linearSceneColor = mix(linearSceneColor, linearOceanFog, uFogFactor);
     } else {
         linearSceneColor = applyHorizonDistanceFog(
             surfaceRadiance,

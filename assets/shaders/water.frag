@@ -129,10 +129,10 @@ float sampleCloudShadow(vec3 worldPos, vec3 L) {
 // Atmospheric Sky Palette & Off-Screen Dome Model (Matching sky.frag 1:1)
 // -------------------------------------------------------------
 vec3 computeProceduralSky(vec3 R, vec3 L, float isDay, float sunIntensity, float goldenHour) {
-    vec3 zenithDay   = vec3(0.16, 0.40, 0.88);
-    vec3 horizonDay  = vec3(0.55, 0.70, 0.92);
-    vec3 zenithDusk  = vec3(0.14, 0.16, 0.38);
-    vec3 horizonDusk = vec3(0.96, 0.52, 0.22);
+    vec3 zenithDay   = vec3(0.14, 0.36, 0.85);
+    vec3 horizonDay  = vec3(0.60, 0.74, 0.90);
+    vec3 zenithDusk  = vec3(0.12, 0.14, 0.36);
+    vec3 horizonDusk = vec3(1.12, 0.58, 0.16);
     vec3 zenithNight = vec3(0.007, 0.012, 0.025);
     vec3 horizonNight= vec3(0.018, 0.025, 0.048);
 
@@ -149,20 +149,20 @@ vec3 computeProceduralSky(vec3 R, vec3 L, float isDay, float sunIntensity, float
     // Subtle atmospheric horizon aerosol haze band
     float hazeDist = abs(R.y - 0.015);
     float hazeBand = exp(-hazeDist * 14.0);
-    vec3 hazeDay = mix(vec3(0.68, 0.78, 0.90), vec3(0.98, 0.65, 0.36), goldenHour);
+    vec3 hazeDay = mix(vec3(0.70, 0.80, 0.90), vec3(1.10, 0.68, 0.32), goldenHour);
     vec3 hazeColor = mix(vec3(0.014, 0.019, 0.032), hazeDay, isDay);
-    skyRgb = mix(skyRgb, hazeColor, hazeBand * 0.35);
+    skyRgb = mix(skyRgb, hazeColor, hazeBand * 0.45);
 
     // Solar atmospheric forward warmth
     float cosSun = dot(R, L);
     if (cosSun > 0.0 && isDay > 0.05) {
-        float sunWarmth = pow(clamp(cosSun * 0.5 + 0.5, 0.0, 1.0), 3.0) * 0.38;
-        vec3 warmthColor = mix(vec3(0.28, 0.25, 0.16), vec3(0.82, 0.46, 0.15), goldenHour);
+        float sunWarmth = pow(clamp(cosSun * 0.5 + 0.5, 0.0, 1.0), 2.5) * 0.55;
+        vec3 warmthColor = mix(vec3(0.35, 0.30, 0.18), vec3(1.10, 0.60, 0.18), goldenHour);
         skyRgb += warmthColor * (sunWarmth * isDay);
 
         // Soft circumsolar corona glow
-        float corona = pow(clamp(cosSun, 0.0, 1.0), 24.0) * 0.85 + pow(clamp(cosSun, 0.0, 1.0), 180.0) * 2.5;
-        vec3 coronaCol = mix(vec3(1.8, 1.6, 1.2), vec3(3.2, 1.8, 0.6), goldenHour);
+        float corona = pow(clamp(cosSun, 0.0, 1.0), 24.0) * 1.10 + pow(clamp(cosSun, 0.0, 1.0), 160.0) * 3.5;
+        vec3 coronaCol = mix(vec3(2.2, 1.9, 1.4), vec3(4.2, 2.4, 0.8), goldenHour);
         skyRgb += coronaCol * (corona * isDay * sunIntensity);
     }
 
@@ -370,8 +370,8 @@ vec3 applyHorizonDistanceFog(vec3 surfaceColor, vec3 fragPos, vec3 camPos, vec3 
     if (rayDist < 0.001) return surfaceColor;
     vec3 V = rayDir / rayDist;
 
-    // Horizon fade start: 70% of render distance (clean, crisp nearby world, smooth horizon edge fade)
-    float startRatio = 0.70;
+    // Horizon fade start: 55% of render distance for rich aerial perspective while keeping foreground crisp
+    float startRatio = 0.55;
     float fogStart = fogEndDist * startRatio;
 
     // Everything closer than fogStart has ZERO fog: 100% crisp, vibrant, high-contrast nearby world!
@@ -385,18 +385,31 @@ vec3 applyHorizonDistanceFog(vec3 surfaceColor, vec3 fragPos, vec3 camPos, vec3 
 
     // Directional In-Scattered Air-Light Color matching sky dome at horizon
     vec3 linearHorizonSky = srgbToLinear(skyFogColor);
-    vec3 zenithSky = linearHorizonSky * vec3(0.68, 0.84, 1.22);
+    vec3 zenithSky = linearHorizonSky * vec3(0.72, 0.86, 1.18);
     vec3 baseAirLight = mix(linearHorizonSky, zenithSky, clamp(V.y * 0.55 + 0.15, 0.0, 1.0));
 
-    // Smooth forward solar warming without any hard cone cutoff or circle artifacts
+    // Smooth forward solar warming with Henyey-Greenstein Mie forward scattering
     float cosTheta = dot(V, L);
-    if (cosTheta > 0.0 && isDay > 0.05) {
-        float forwardPhase = pow(cosTheta, 4.0) * 0.35;
-        vec3 goldenHaze = mix(vec3(1.10, 1.04, 0.95), vec3(1.65, 1.25, 0.70), goldenHour);
+    if (isDay > 0.05) {
+        // Broad forward scattering across the sun hemisphere + sharp circumsolar flare
+        float broadPhase = pow(max(cosTheta * 0.5 + 0.5, 0.0), 2.5) * 0.50;
+        float peakPhase  = pow(max(cosTheta, 0.0), 6.0) * 0.65;
+        float forwardPhase = (broadPhase + peakPhase);
+
+        vec3 goldenHaze = mix(vec3(1.18, 1.08, 0.92), vec3(1.95, 1.35, 0.55), goldenHour);
         baseAirLight = mix(baseAirLight, baseAirLight * goldenHaze, forwardPhase);
     }
 
-    return mix(surfaceColor, baseAirLight, fogFactor);
+    vec3 result = mix(surfaceColor, baseAirLight, fogFactor);
+
+    // Subtle forward solar aerial haze on distant geometry facing the sun (AAA shader pack look)
+    if (cosTheta > 0.0 && isDay > 0.05) {
+        float forwardHaze = pow(cosTheta, 2.0) * isDay * clamp(rayDist / (fogEndDist * 0.75), 0.0, 1.0);
+        vec3 forwardGlow = mix(vec3(0.12, 0.10, 0.06), vec3(0.45, 0.28, 0.10), goldenHour);
+        result += forwardGlow * (forwardHaze * 0.20);
+    }
+
+    return result;
 }
 
 
@@ -491,18 +504,18 @@ void main() {
     // 2. Physical Beer-Lambert Absorption (Red -> Green -> Blue)
     // -------------------------------------------------------------
     // Exponential extinction per color channel: red absorbs rapidly, green moderately, blue penetrates deeply
-    vec3 extinctionCoeff = vec3(0.48, 0.16, 0.04);
+    vec3 extinctionCoeff = vec3(0.55, 0.22, 0.05);
     vec3 transmittance = exp(-waterDepthMeters * extinctionCoeff);
 
-    // Color gradient: clear luminous translucent teal shallows to deep saturated oceanic slate-blue / dark teal
-    vec3 shallowWaterColor = mix(vec3(0.055, 0.32, 0.38), vec3(0.075, 0.38, 0.46), isDay);
-    vec3 deepWaterColor    = mix(vec3(0.003, 0.015, 0.035), vec3(0.010, 0.062, 0.105), isDay);
+    // Color gradient: clear crystal shallows transitioning to deep oceanic dark navy
+    vec3 shallowWaterColor = mix(vec3(0.015, 0.065, 0.10), vec3(0.020, 0.080, 0.13), isDay);
+    vec3 deepWaterColor    = mix(vec3(0.001, 0.005, 0.015), vec3(0.002, 0.012, 0.035), isDay);
 
     // Deep water extinction: color = deepColor + (shallowColor - deepColor) * exp(-depth * extinctionCoeff)
     vec3 waterBedColor = deepWaterColor + (shallowWaterColor - deepWaterColor) * transmittance;
 
-    // Smooth physical shoreline opacity: 0% at zero depth (crystal clear beach edge), rising smoothly to deep water
-    float baseAlpha = clamp(1.0 - exp(-waterDepthMeters * 0.65), 0.0, 0.95);
+    // Smooth physical shoreline opacity: crystal clear at zero depth, smoothly building body opacity
+    float baseAlpha = clamp(1.0 - exp(-waterDepthMeters * 0.45), 0.0, 0.92);
 
     // -------------------------------------------------------------
     // 3. Dynamic Wave Ripples & Surface Motion
@@ -658,16 +671,15 @@ void main() {
                 }
             }
 
-            // Direct sun disc through Snell's window
+            // Smooth anti-aliased sun disc through Snell's window (no flashing pixel steps)
             float cosSun = dot(R_refractG, L);
-            if (cosSun > 0.995 && isDay > 0.05) {
-                skyRefract += vec3(3.8, 3.2, 2.2) * isDay * sunIntensity;
-            }
+            float sunDisc = smoothstep(0.996, 0.9995, cosSun);
+            skyRefract += vec3(1.2, 1.1, 0.95) * (sunDisc * isDay * sunIntensity);
 
-            // Luminous chromatic fringe at the rim of Snell's window
-            float windowBorder = smoothstep(0.82, 0.99, sin2_t);
-            vec3 fringeColor = mix(vec3(0.2, 0.5, 0.7), vec3(0.8, 0.6, 0.3), goldenHour);
-            skyRefract = mix(skyRefract, fringeColor * 1.6, windowBorder * 0.55);
+            // Subtle chromatic fringe at the rim of Snell's window
+            float windowBorder = smoothstep(0.85, 0.99, sin2_t);
+            vec3 fringeColor = mix(vec3(0.10, 0.22, 0.35), vec3(0.45, 0.35, 0.20), goldenHour);
+            skyRefract = mix(skyRefract, fringeColor, windowBorder * 0.35);
 
             // Fluid caustic wash on surface
             skyRefract += vec3(0.05, 0.14, 0.18) * fluidCaustic * isDay;
@@ -711,11 +723,11 @@ void main() {
         vec3 sunGlintColor = mix(vec3(2.80, 2.60, 2.30), vec3(4.20, 2.80, 1.20), goldenHour);
         vec3 sunGlint = specularGGX * NdotL * sunIntensity * sunGlintColor * isDay * rtShadow;
 
-        // Subsurface Water Scattering: subtle emerald glow through wave crests
+        // Subsurface Water Scattering: subtle deep oceanic glow through wave crests
         vec3 sssColor = vec3(0.0);
         if (vibrant && optWaterQuality >= 2) {
             float sss = pow(clamp(dot(V, -L), 0.0, 1.0), 3.5) * exp(-waterDepthMeters * 0.25) * 0.20 * isDay;
-            sssColor = vec3(0.015, 0.10, 0.14) * sss * rtShadow;
+            sssColor = vec3(0.008, 0.045, 0.085) * sss * rtShadow;
         }
 
         // Shoreline Foam Wash where continuous water depth drops below 0.35m
@@ -724,37 +736,61 @@ void main() {
         float foam = shoreFoamMask * smoothstep(0.30, 0.75, foamNoise) * isDay;
         vec3 foamColor = vec3(0.95, 0.98, 1.0) * (foam * 0.40);
 
-        // Aquatic Reflection onto Rich Ocean Water
-        vec3 reflTint = mix(vec3(0.75, 0.88, 1.02), vec3(0.98, 0.99, 1.0), fresnel);
+        // Aquatic Reflection onto Deep Navy Ocean Water
+        vec3 reflTint = mix(vec3(0.92, 0.94, 0.97), vec3(1.0, 1.0, 1.0), fresnel);
         vec3 reflColor = reflectedScene * reflTint;
 
-        // Balanced Fresnel mix: looking down keeps rich dark teal body prominent, grazing angles transition to mirror reflection
-        float reflFactor = clamp(fresnel * 0.85 + 0.06, 0.0, 0.92);
+        // Balanced Fresnel mix: looking down keeps rich dark navy body prominent, grazing angles transition to mirror reflection
+        float reflFactor = clamp(fresnel * 0.80 + 0.03, 0.0, 0.88);
 
         waterSurfaceColor = mix(waterBedColor, reflColor, reflFactor) + sunGlint + foamColor + sssColor;
         finalAlpha = clamp(baseAlpha + fresnel * (1.0 - baseAlpha) + foam * 0.30, 0.0, 0.96);
     }
 
 
-    // Dynamic torch lights
-    waterSurfaceColor += vec3(1.0, 0.65, 0.22) * fragColor.b;
+    // Physically-based specular point light reflections on water waves (Torches)
+    vec3 torchSpecular = vec3(0.0);
+    vec3 torchColor = vec3(1.2, 0.85, 0.40);
 
     if (pc.heldTorch.w > 0.001) {
-        float dHeld = length(fragWorldPos - pc.heldTorch.xyz);
-        float atten = clamp(1.0 - dHeld / 16.0, 0.0, 1.0);
-        waterSurfaceColor += vec3(1.0, 0.65, 0.22) * (atten * atten * 2.2 * pc.heldTorch.w);
+        vec3 toHeld = pc.heldTorch.xyz - fragWorldPos;
+        float dHeld = length(toHeld);
+        if (dHeld < 16.0) {
+            vec3 L_held = toHeld / dHeld;
+            vec3 H_held = normalize(L_held + V);
+            float NdotH = max(dot(effDetailN, H_held), 0.0);
+            float spec = pow(NdotH, 64.0);
+            float atten = clamp(1.0 - dHeld / 16.0, 0.0, 1.0);
+            torchSpecular += torchColor * (spec * atten * atten * 1.8 * pc.heldTorch.w);
+        }
     }
 
     if (pc.pointLight1.w > 0.001) {
-        float dLight = length(fragWorldPos - pc.pointLight1.xyz);
-        float atten = clamp(1.0 - dLight / 16.0, 0.0, 1.0);
-        waterSurfaceColor += vec3(1.0, 0.65, 0.22) * (atten * atten * 2.0 * pc.pointLight1.w);
+        vec3 toLight = pc.pointLight1.xyz - fragWorldPos;
+        float dLight = length(toLight);
+        if (dLight < 16.0) {
+            vec3 L_light = toLight / dLight;
+            vec3 H_light = normalize(L_light + V);
+            float NdotH = max(dot(effDetailN, H_light), 0.0);
+            float spec = pow(NdotH, 64.0);
+            float atten = clamp(1.0 - dLight / 16.0, 0.0, 1.0);
+            torchSpecular += torchColor * (spec * atten * atten * 1.5 * pc.pointLight1.w);
+        }
     }
     if (pc.pointLight2.w > 0.001) {
-        float dLight = length(fragWorldPos - pc.pointLight2.xyz);
-        float atten = clamp(1.0 - dLight / 16.0, 0.0, 1.0);
-        waterSurfaceColor += vec3(1.0, 0.65, 0.22) * (atten * atten * 2.0 * pc.pointLight2.w);
+        vec3 toLight = pc.pointLight2.xyz - fragWorldPos;
+        float dLight = length(toLight);
+        if (dLight < 16.0) {
+            vec3 L_light = toLight / dLight;
+            vec3 H_light = normalize(L_light + V);
+            float NdotH = max(dot(effDetailN, H_light), 0.0);
+            float spec = pow(NdotH, 64.0);
+            float atten = clamp(1.0 - dLight / 16.0, 0.0, 1.0);
+            torchSpecular += torchColor * (spec * atten * atten * 1.5 * pc.pointLight2.w);
+        }
     }
+
+    waterSurfaceColor += torchSpecular;
 
     // Atmospheric Perspective & Distance Fog
     float fogEnd = abs(pc.skyFog.w);
@@ -762,8 +798,10 @@ void main() {
 
     if (cameraUnderwater) {
         float dist = length(fragWorldPos - pc.camPos.xyz);
-        float uFactor = smoothstep(2.0, 24.0, dist);
-        waterSurfaceColor = mix(waterSurfaceColor, vec3(0.008, 0.045, 0.080), uFactor);
+        float uFactor = smoothstep(fogEnd * 0.40, fogEnd, dist);
+        vec3 linearOceanFog = srgbToLinear(pc.skyFog.rgb);
+        waterSurfaceColor = mix(waterSurfaceColor, linearOceanFog, uFactor);
+        finalAlpha = mix(finalAlpha, 1.0, uFactor);
     } else {
         waterSurfaceColor = applyHorizonDistanceFog(
             waterSurfaceColor,
