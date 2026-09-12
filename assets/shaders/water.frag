@@ -291,7 +291,7 @@ vec3 getReflectionColor(vec3 origin, vec3 R, vec3 L, float isDay, float sunInten
     float goldenHour = smoothstep(0.40, 0.02, pc.dayInfo.y) * step(-0.06, pc.dayInfo.y);
     vec3 sky = computeProceduralSky(R, L, isDay, sunIntensity, goldenHour);
 
-    // 1. Procedural 3D volumetric cumulus clouds (high-contrast, puffy clouds for off-screen reflections and looking down)
+    // 1. Procedural 3D volumetric cumulus clouds (high-contrast, puffy clouds reflecting on water)
     if (R.y > 0.015 && waterQuality >= 1) {
         float tCloud = (196.0 - origin.y) / max(R.y, 0.02);
         if (tCloud > 0.0 && tCloud < 6000.0) {
@@ -308,35 +308,6 @@ vec3 getReflectionColor(vec3 origin, vec3 R, vec3 L, float isDay, float sunInten
                 vec3 cloudLit = mix(vec3(0.25, 0.30, 0.42), goldenCloud * silver, isDay);
                 sky = mix(sky, cloudLit, cAlpha);
             }
-        }
-    }
-
-    // 2. High-fidelity on-screen sky & 3D volumetric cloud reflection:
-    // If the reflected ray points into visible on-screen sky, sample the actual rendered clouds from ssrSampler!
-    if (R.y > 0.015 && waterQuality >= 1) {
-        vec4 skyClip = pc.mvp * vec4(origin + R * 400.0, 1.0);
-        if (skyClip.w > 0.05) {
-            vec2 skyUV = (skyClip.xy / skyClip.w) * 0.5 + 0.5;
-            if (skyUV.x >= 0.001 && skyUV.x <= 0.999 && skyUV.y >= 0.001 && skyUV.y <= 0.999) {
-                float skyDepth = texture(depthSampler, skyUV).r;
-                // Since clouds render with depthWrite = false, sky pixels (including 3D clouds) have depth >= 0.999
-                if (skyDepth >= 0.999) {
-                    vec3 onScreenSky = texture(ssrSampler, skyUV).rgb;
-                    float skyEdgeFade = smoothstep(0.0, 0.015, skyUV.x) *
-                                        smoothstep(0.0, 0.015, 1.0 - skyUV.x) *
-                                        smoothstep(0.0, 0.015, skyUV.y) *
-                                        smoothstep(0.0, 0.015, 1.0 - skyUV.y);
-                    sky = mix(sky, onScreenSky, skyEdgeFade);
-                }
-            }
-        }
-    }
-
-    // 3. Real-time ray-marched SSR reflection (terrain, trees, cliffs, buildings)
-    if (waterQuality >= 1) {
-        vec4 ssrHit = traceSSR(origin + vec3(0.0, 0.03, 0.0), R, waveGrad);
-        if (ssrHit.a > 0.0) {
-            sky = mix(sky, ssrHit.rgb, ssrHit.a);
         }
     }
 
@@ -464,10 +435,10 @@ void main() {
     float waterDepthMeters = depthFactor * 8.0;
     vec3 transmittance = exp(-waterDepthMeters * sigmaA);
 
-    // Deep ocean bed: rich oceanic sapphire navy
-    vec3 deepWaterRadiance = mix(vec3(0.002, 0.008, 0.022), vec3(0.006, 0.022, 0.055), isDay);
-    // Shallow waterbed: dark marine azure
-    vec3 shallowWaterRadiance = mix(vec3(0.004, 0.015, 0.035), vec3(0.014, 0.048, 0.095), isDay);
+    // Deep ocean bed: rich oceanic sapphire navy (sea dark blue)
+    vec3 deepWaterRadiance = mix(vec3(0.005, 0.018, 0.055), vec3(0.016, 0.065, 0.185), isDay);
+    // Shallow waterbed: luminous marine azure / cyan-blue
+    vec3 shallowWaterRadiance = mix(vec3(0.010, 0.038, 0.085), vec3(0.032, 0.125, 0.265), isDay);
 
     vec3 waterBedColor = mix(deepWaterRadiance, shallowWaterRadiance, transmittance);
 
@@ -603,11 +574,22 @@ void main() {
         float foam = foamEdge * smoothstep(0.42, 0.85, foamWave) * isDay;
         vec3 foamColor = vec3(0.92, 0.96, 1.0) * (foam * 0.40);
 
-        // Composite water radiance:
-        // Reflection weight starts at 38% looking straight down, ramping up to 92% at horizon
-        float reflWeight = clamp(fresnel, 0.38, 0.92);
-        waterSurfaceColor = mix(waterBedColor, reflectedScene, reflWeight) + sunGlint + foamColor + sssColor;
-        finalAlpha = clamp(baseAlpha + fresnel * (1.0 - baseAlpha) + foam * 0.30, 0.25, 0.96);
+        // -------------------------------------------------------------
+        // Multiply-Style Reflection onto Sea Dark Blue Water Surface
+        // -------------------------------------------------------------
+        // Water is NOT a flat chrome mirror.
+        // The reflection softly illuminates and multiplies onto the rich oceanic blue water surface.
+        vec3 waterReflectTint = mix(vec3(0.40, 0.60, 0.85), vec3(0.70, 0.85, 1.05), isDay);
+        vec3 tintedReflect = reflectedScene * waterReflectTint;
+
+        // Multiply component: clouds and bright sky illuminate the water surface
+        vec3 multipliedWater = waterBedColor * (0.65 + tintedReflect * 0.85);
+
+        // Soft specular reflection sheen from Fresnel (clouds and sky highlights softly glistening)
+        vec3 specularSheen = tintedReflect * (fresnel * 0.32);
+
+        waterSurfaceColor = multipliedWater + specularSheen + sunGlint + foamColor + sssColor;
+        finalAlpha = clamp(baseAlpha + fresnel * (1.0 - baseAlpha) + foam * 0.30, 0.40, 0.96);
     }
 
 
