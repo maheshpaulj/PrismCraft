@@ -207,7 +207,7 @@ vec4 traceSSR(vec3 rayOrigin, vec3 rayDir) {
             continue;
         }
 
-        vec2 uv = (clip.xy / clip.w) * 0.5 + 0.5;
+        vec2 uv = vec2((clip.x / clip.w) * 0.5 + 0.5, 1.0 - ((clip.y / clip.w) * 0.5 + 0.5));
         float rayLinearDepth = clip.w;
 
         // Stop if ray exits screen bounds
@@ -253,7 +253,7 @@ vec4 traceSSR(vec3 rayOrigin, vec3 rayDir) {
                 vec3 pMid = rayOrigin + marchDir * tMid;
                 vec4 cMid = pc.mvp * vec4(pMid, 1.0);
                 if (cMid.w > 0.05) {
-                    vec2 uvMid = (cMid.xy / cMid.w) * 0.5 + 0.5;
+                    vec2 uvMid = vec2((cMid.x / cMid.w) * 0.5 + 0.5, 1.0 - ((cMid.y / cMid.w) * 0.5 + 0.5));
                     float sDepth = linearizeDepth(texture(depthSampler, uvMid).r);
                     float sY = pc.camPos.y + (pMid.y - pc.camPos.y) * (sDepth / cMid.w);
                     if (sY > rayOrigin.y + 0.15 && cMid.w >= sDepth) {
@@ -592,25 +592,32 @@ void main() {
             finalAlpha = 0.88;
         } else {
             // Inside Snell's Window: Refraction into the outside sky, sun, and clouds
+            // Realistic optical dispersion: red refracts less, blue refracts more (chromatic fringe)
             vec3 N_refractNormal = normalize(mix(vec3(0.0, -1.0, 0.0), N_down, 0.40));
-            vec3 R_refract = refract(-V, N_refractNormal, eta);
-            if (length(R_refract) < 0.01) {
-                R_refract = vec3(0.0, 1.0, 0.0);
-            }
+            vec3 R_refractG = refract(-V, N_refractNormal, 1.333);
+            vec3 R_refractR = refract(-V, N_refractNormal, 1.328);
+            vec3 R_refractB = refract(-V, N_refractNormal, 1.339);
 
-            vec3 skyRefract = computeProceduralSky(R_refract, L, isDay, sunIntensity, goldenHour);
+            if (length(R_refractG) < 0.01) R_refractG = vec3(0.0, 1.0, 0.0);
+            if (length(R_refractR) < 0.01) R_refractR = R_refractG;
+            if (length(R_refractB) < 0.01) R_refractB = R_refractG;
+
+            vec3 skyRefractG = computeProceduralSky(R_refractG, L, isDay, sunIntensity, goldenHour);
+            vec3 skyRefractR = computeProceduralSky(R_refractR, L, isDay, sunIntensity, goldenHour);
+            vec3 skyRefractB = computeProceduralSky(R_refractB, L, isDay, sunIntensity, goldenHour);
+            vec3 skyRefract = vec3(skyRefractR.r, skyRefractG.g, skyRefractB.b);
 
             // Refract 3D volumetric clouds through Snell's window
-            if (R_refract.y > 0.02) {
-                float tCloud = (196.0 - fragWorldPos.y) / max(R_refract.y, 0.02);
+            if (R_refractG.y > 0.02) {
+                float tCloud = (196.0 - fragWorldPos.y) / max(R_refractG.y, 0.02);
                 if (tCloud > 0.0 && tCloud < 5000.0) {
-                    vec3 pCloud = fragWorldPos + R_refract * tCloud;
+                    vec3 pCloud = fragWorldPos + R_refractG * tCloud;
                     vec2 ws = pCloud.xz + vec2(pc.camPos.w * 2.2, pc.camPos.w * 0.9);
                     float macroNoise = cloudFBM(vec3(ws * 0.00028, 0.5));
                     if (macroNoise > 0.22) {
                         float cDensity = smoothstep(0.22, 0.48, macroNoise);
                         float cAlpha = clamp(cDensity * 2.0, 0.0, 0.96);
-                        float silver = pow(max(dot(R_refract, L) * 0.5 + 0.5, 0.0), 3.0) * 0.70 + 0.85;
+                        float silver = pow(max(dot(R_refractG, L) * 0.5 + 0.5, 0.0), 3.0) * 0.70 + 0.85;
                         vec3 goldenCloud = mix(vec3(1.50, 1.45, 1.35), vec3(2.40, 1.65, 0.85), goldenHour);
                         vec3 cloudLit = mix(vec3(0.25, 0.30, 0.42), goldenCloud * silver, isDay);
                         skyRefract = mix(skyRefract, cloudLit, cAlpha);
@@ -619,25 +626,28 @@ void main() {
             }
 
             // Direct sun disc through Snell's window
-            float cosSun = dot(R_refract, L);
+            float cosSun = dot(R_refractG, L);
             if (cosSun > 0.995 && isDay > 0.05) {
-                skyRefract += vec3(3.5, 3.0, 2.0) * isDay * sunIntensity;
+                skyRefract += vec3(3.8, 3.2, 2.2) * isDay * sunIntensity;
             }
 
-            // Luminous caustic fringe at the rim of Snell's window
-            float windowBorder = smoothstep(0.85, 0.98, sin2_t);
-            skyRefract = mix(skyRefract, underWaterTint * 1.5, windowBorder * 0.6);
+            // Luminous chromatic fringe at the rim of Snell's window
+            float windowBorder = smoothstep(0.82, 0.99, sin2_t);
+            vec3 fringeColor = mix(vec3(0.2, 0.5, 0.7), vec3(0.8, 0.6, 0.3), goldenHour);
+            skyRefract = mix(skyRefract, fringeColor * 1.6, windowBorder * 0.55);
 
             // Fluid caustic wash on surface
-            skyRefract += vec3(0.04, 0.12, 0.16) * fluidCaustic * isDay;
+            skyRefract += vec3(0.05, 0.14, 0.18) * fluidCaustic * isDay;
 
-            waterSurfaceColor = mix(skyRefract, underWaterTint, 0.20);
-            finalAlpha = mix(0.35, 0.80, windowBorder);
+            waterSurfaceColor = mix(skyRefract, underWaterTint, 0.18);
+            finalAlpha = mix(0.28, 0.85, windowBorder);
         }
 
-        // Downward caustic light beams in water
-        float sunBeams = fluidCaustic * 0.45 * sunIntensity * isDay;
-        vec3 beamColor = mix(vec3(0.12, 0.35, 0.50), vec3(0.85, 0.80, 0.55), goldenHour);
+        // Volumetric forward-scattered sunlight beams penetrating the surface
+        float cosSunBeam = dot(-V, L);
+        float phaseHG = (1.0 - 0.4225) / pow(1.0 + 0.4225 - 2.0 * 0.65 * cosSunBeam, 1.5) * 0.079577;
+        float sunBeams = fluidCaustic * (phaseHG * 2.8 + 0.25) * sunIntensity * isDay;
+        vec3 beamColor = mix(vec3(0.12, 0.38, 0.52), vec3(0.95, 0.88, 0.60), goldenHour);
         waterSurfaceColor += beamColor * sunBeams;
 
     } else {

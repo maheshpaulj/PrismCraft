@@ -569,7 +569,7 @@ void PostProcessRenderer::render(VkCommandBuffer cmd, VkImageView swapchainImage
 
 void PostProcessRenderer::renderQuad(VkCommandBuffer cmd, VkExtent2D extent,
                                      float exposure, float vibrance, float bloomStrength, float time,
-                                     bool vibrantVisuals, float sharpening) {
+                                     bool vibrantVisuals, float sharpening, float isUnderwater) {
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
@@ -589,7 +589,7 @@ void PostProcessRenderer::renderQuad(VkCommandBuffer cmd, VkExtent2D extent,
 
     PostProcessPushConstants pc{};
     pc.params = glm::vec4(exposure, vibrance, bloomStrength, time);
-    pc.options = glm::vec4(vibrantVisuals ? 1.0f : 0.0f, sharpening, 0.0f, 0.0f);
+    pc.options = glm::vec4(vibrantVisuals ? 1.0f : 0.0f, sharpening, 0.0f, isUnderwater);
 
     vkCmdPushConstants(cmd, m_pipeline->getLayout(),
                        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,

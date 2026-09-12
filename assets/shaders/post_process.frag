@@ -60,7 +60,24 @@ void main() {
     vec2 texSize = vec2(textureSize(hdrSceneTexture, 0));
     vec2 texel = 1.0 / max(texSize, vec2(1.0));
 
-    vec3 centerHdr = texture(hdrSceneTexture, inUV).rgb;
+    vec2 sampleUV = inUV;
+    vec3 centerHdr;
+
+    if (pc.options.w > 0.5) {
+        float t = pc.params.w;
+        // Animated dual-octave refractive liquid wobble to simulate underwater optical distortion
+        float w1 = sin(inUV.y * 18.0 + t * 2.2) * cos(inUV.x * 12.0 + t * 1.5) * 0.0022;
+        float w2 = cos(inUV.x * 22.0 - t * 1.8) * sin(inUV.y * 16.0 + t * 2.0) * 0.0018;
+        sampleUV += vec2(w1, w2);
+
+        // Subtle underwater chromatic dispersion at screen edges
+        vec2 caOffset = (inUV - 0.5) * 0.0025;
+        centerHdr.r = texture(hdrSceneTexture, sampleUV + caOffset).r;
+        centerHdr.g = texture(hdrSceneTexture, sampleUV).g;
+        centerHdr.b = texture(hdrSceneTexture, sampleUV - caOffset).b;
+    } else {
+        centerHdr = texture(hdrSceneTexture, sampleUV).rgb;
+    }
 
     bool isVibrant = (pc.options.x > 0.5);
     float exposure = (pc.params.x > 0.001) ? pc.params.x : 0.95;
@@ -75,15 +92,15 @@ void main() {
         vec2 r2 = texel * 5.0;
 
         vec3 b0 = extractBloom(centerHdr) * 0.22;
-        vec3 b1 = extractBloom(texture(hdrSceneTexture, inUV + vec2( r1.x,  0.0)).rgb) * 0.12;
-        vec3 b2 = extractBloom(texture(hdrSceneTexture, inUV + vec2(-r1.x,  0.0)).rgb) * 0.12;
-        vec3 b3 = extractBloom(texture(hdrSceneTexture, inUV + vec2( 0.0,  r1.y)).rgb) * 0.12;
-        vec3 b4 = extractBloom(texture(hdrSceneTexture, inUV + vec2( 0.0, -r1.y)).rgb) * 0.12;
+        vec3 b1 = extractBloom(texture(hdrSceneTexture, sampleUV + vec2( r1.x,  0.0)).rgb) * 0.12;
+        vec3 b2 = extractBloom(texture(hdrSceneTexture, sampleUV + vec2(-r1.x,  0.0)).rgb) * 0.12;
+        vec3 b3 = extractBloom(texture(hdrSceneTexture, sampleUV + vec2( 0.0,  r1.y)).rgb) * 0.12;
+        vec3 b4 = extractBloom(texture(hdrSceneTexture, sampleUV + vec2( 0.0, -r1.y)).rgb) * 0.12;
 
-        vec3 b5 = extractBloom(texture(hdrSceneTexture, inUV + vec2( r2.x,  r2.y)).rgb) * 0.075;
-        vec3 b6 = extractBloom(texture(hdrSceneTexture, inUV + vec2(-r2.x,  r2.y)).rgb) * 0.075;
-        vec3 b7 = extractBloom(texture(hdrSceneTexture, inUV + vec2( r2.x, -r2.y)).rgb) * 0.075;
-        vec3 b8 = extractBloom(texture(hdrSceneTexture, inUV + vec2(-r2.x, -r2.y)).rgb) * 0.075;
+        vec3 b5 = extractBloom(texture(hdrSceneTexture, sampleUV + vec2( r2.x,  r2.y)).rgb) * 0.075;
+        vec3 b6 = extractBloom(texture(hdrSceneTexture, sampleUV + vec2(-r2.x,  r2.y)).rgb) * 0.075;
+        vec3 b7 = extractBloom(texture(hdrSceneTexture, sampleUV + vec2( r2.x, -r2.y)).rgb) * 0.075;
+        vec3 b8 = extractBloom(texture(hdrSceneTexture, sampleUV + vec2(-r2.x, -r2.y)).rgb) * 0.075;
 
         bloom = b0 + b1 + b2 + b3 + b4 + b5 + b6 + b7 + b8;
     }

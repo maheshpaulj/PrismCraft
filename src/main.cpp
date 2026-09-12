@@ -1667,7 +1667,7 @@ void run() {
         // 1. Tonemap & Composite 3D Scene into Swapchain
         postProcessRenderer.renderQuad(cmd, swapchain.getExtent(),
                                        options.exposure, 1.0f, 0.05f, timer.getElapsedTime(),
-                                       options.vibrantVisuals, 0.0f);
+                                       options.vibrantVisuals, 0.0f, isUnderwater ? 1.0f : 0.0f);
 
         // 2. Crisp 2D UI & Menus Overlay on top
         VkViewport uiViewport{};

@@ -35,7 +35,7 @@ public:
 
     void renderQuad(VkCommandBuffer cmd, VkExtent2D extent,
                     float exposure, float vibrance, float bloomStrength, float time,
-                    bool vibrantVisuals, float sharpening = 0.0f);
+                    bool vibrantVisuals, float sharpening = 0.0f, float isUnderwater = 0.0f);
 
     void copyHDRToSSR(VkCommandBuffer cmd, VkImage sceneDepthImage = VK_NULL_HANDLE);
 

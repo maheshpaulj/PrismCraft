@@ -475,36 +475,80 @@ void main() {
     vec3 surfaceRadiance = albedo * totalLight + foliageGlow;
 
     // 7. Water Column Beer-Lambert Absorption & Seabed Caustics (Submerged surfaces under water)
+    // 7. Water Column Beer-Lambert Absorption & Organic Seabed Caustics (Submerged surfaces under water)
     if (isSubmerged) {
         float waterDepth = max(44.5 - fragWorldPos.y, 0.4);
-        vec3 waterAbsorption = vec3(0.26, 0.09, 0.038);
+        vec3 waterAbsorption = vec3(0.28, 0.10, 0.035);
         vec3 beerTransmittance = exp(-waterDepth * waterAbsorption);
         surfaceRadiance *= beerTransmittance;
 
-        vec3 deepWaterTint = mix(vec3(0.004, 0.015, 0.045), vec3(0.008, 0.035, 0.095), isDay);
-        float depthFog = 1.0 - exp(-waterDepth * 0.16);
-        surfaceRadiance = mix(surfaceRadiance, deepWaterTint, depthFog * 0.72);
+        vec3 deepWaterTint = mix(vec3(0.004, 0.015, 0.045), vec3(0.008, 0.045, 0.080), isDay);
+        float depthFog = 1.0 - exp(-waterDepth * 0.18);
+        surfaceRadiance = mix(surfaceRadiance, deepWaterTint, depthFog * 0.75);
 
-        float t = pc.camPos.w * 2.0;
+        // Organic fluid caustic light webs on seabed (eliminates 2D checkerboard grid)
+        float t = pc.camPos.w * 0.8;
         vec2 p = fragWorldPos.xz;
-        float c1 = sin(p.x * 2.4 + t * 1.5) * sin(p.y * 2.4 + t * 1.2);
-        float c2 = sin(p.x * 4.8 - t * 1.8 + p.y * 2.6) * cos(p.y * 4.8 + t * 1.5);
-        float caustic = pow(clamp(c1 * 0.5 + c2 * 0.5 + 0.5, 0.0, 1.0), 3.0);
-        vec3 causticColor = mix(vec3(0.12, 0.35, 0.60), vec3(1.05, 0.98, 0.75), isDay);
-        float causticFade = exp(-waterDepth * 0.28);
-        surfaceRadiance += caustic * 0.22 * blockShadow * max(sunIntensity, 0.20) * causticColor * causticFade;
+        vec2 cp1 = p * 0.70 + vec2(t * 0.22, t * 0.15);
+        vec2 cp2 = p * 0.95 - vec2(t * 0.18, -t * 0.25);
+        float cw1 = sin(cp1.x * 2.2 + sin(cp1.y * 1.8 + t * 0.8));
+        float cw2 = cos(cp1.y * 2.4 + cos(cp1.x * 1.9 - t * 0.7));
+        float cw3 = sin(cp2.x * 3.1 + cos(cp2.y * 2.5 + t * 0.9));
+        float cw4 = cos(cp2.y * 2.8 + sin(cp2.x * 2.7 - t * 0.6));
+        float caustic1 = 1.0 - abs(cw1 + cw2) * 0.5;
+        float caustic2 = 1.0 - abs(cw3 + cw4) * 0.5;
+        float fluidCaustic = pow(clamp(caustic1 * caustic2, 0.0, 1.0), 2.2);
+
+        vec3 causticColor = mix(vec3(0.12, 0.38, 0.60), vec3(1.10, 1.02, 0.80), isDay);
+        float causticFade = exp(-waterDepth * 0.24);
+        surfaceRadiance += fluidCaustic * 0.35 * blockShadow * max(sunIntensity, 0.20) * causticColor * causticFade;
     }
 
-    // 8. Atmospheric Aerial Perspective & Distance Fog in Linear Space
+    // 8. Atmospheric Aerial Perspective & AAA Volumetric Underwater In-Scattering
     bool cameraUnderwater = (pc.skyFog.w < 0.0);
     float fogEnd = abs(pc.skyFog.w);
     vec3 linearSceneColor = surfaceRadiance;
 
     if (cameraUnderwater) {
         float dist = length(fragWorldPos - pc.camPos.xyz);
-        float uFactor = smoothstep(2.0, 24.0, dist);
-        linearSceneColor = mix(surfaceRadiance, vec3(0.012, 0.065, 0.110), uFactor);
-        linearSceneColor = mix(linearSceneColor, vec3(0.005, 0.035, 0.075), 0.32);
+        vec3 rayDir = normalize(fragWorldPos - pc.camPos.xyz);
+
+        // 1. Spectral Wavelength-Dependent Beer-Lambert Extinction
+        // Red extinguishes rapidly (3m), green moderately (12m), blue/cyan penetrates furthest (24m)
+        vec3 extinctionCoeff = vec3(0.32, 0.11, 0.035);
+        vec3 volumeTransmittance = exp(-dist * extinctionCoeff);
+        linearSceneColor = surfaceRadiance * volumeTransmittance;
+
+        // 2. Dual-Scatter Oceanic Ambient & Directional Forward Mie Scattering (g = 0.65)
+        float cosTheta = dot(rayDir, L);
+        float phaseHG = (1.0 - 0.4225) / pow(1.0 + 0.4225 - 2.0 * 0.65 * cosTheta, 1.5) * 0.079577;
+
+        vec3 deepWaterAbyss = vec3(0.005, 0.025, 0.055);
+        vec3 shallowWaterTeal = vec3(0.012, 0.070, 0.115);
+        vec3 sunScatterGlow = mix(vec3(0.12, 0.45, 0.55), vec3(0.95, 0.80, 0.48), goldenHour) * (phaseHG * 2.8 * isDay * sunIntensity);
+
+        vec3 ambientInscatter = mix(shallowWaterTeal, deepWaterAbyss, clamp(dist / 24.0, 0.0, 1.0)) + sunScatterGlow;
+        linearSceneColor += ambientInscatter * (1.0 - volumeTransmittance);
+
+        // 3. Volumetric Caustic Sun Shafts (God rays cutting through the water volume)
+        if (isDay > 0.05) {
+            vec3 midPoint = pc.camPos.xyz + rayDir * min(dist * 0.5, 14.0);
+            vec2 shaftP = midPoint.xz + vec2(pc.camPos.w * 0.20, pc.camPos.w * 0.15);
+            float s1 = sin(shaftP.x * 0.8 + shaftP.y * 0.4 + pc.camPos.w * 0.6);
+            float s2 = cos(shaftP.x * 0.5 - shaftP.y * 0.9 - pc.camPos.w * 0.5);
+            float godRay = pow(clamp(s1 * 0.5 + s2 * 0.5 + 0.5, 0.0, 1.0), 3.0) * max(cosTheta * 0.6 + 0.4, 0.0);
+            vec3 godRayColor = mix(vec3(0.15, 0.45, 0.60), vec3(0.95, 0.88, 0.58), goldenHour);
+            linearSceneColor += godRayColor * (godRay * 0.32 * sunIntensity * (1.0 - exp(-dist * 0.18)));
+        }
+
+        // 4. Procedural Floating Marine Snow / Micro-Plankton Specks
+        vec3 pCell = floor(fragWorldPos * 2.5);
+        float speckHash = fract(sin(dot(pCell, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+        if (speckHash > 0.94 && dist < 16.0) {
+            float shimmer = sin(pc.camPos.w * 3.0 + speckHash * 6.28) * 0.5 + 0.5;
+            float speckAtten = 1.0 - dist / 16.0;
+            linearSceneColor += vec3(0.45, 0.75, 0.85) * (shimmer * speckAtten * 0.40 * isDay);
+        }
     } else {
         linearSceneColor = applyHorizonDistanceFog(
             surfaceRadiance,
