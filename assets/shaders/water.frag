@@ -159,13 +159,13 @@ vec3 computeProceduralSky(vec3 R, vec3 L, float isDay, float sunIntensity, float
     // Solar atmospheric forward warmth
     float cosSun = dot(R, L);
     if (cosSun > 0.0 && isDay > 0.05) {
-        float sunWarmth = pow(clamp(cosSun * 0.5 + 0.5, 0.0, 1.0), 3.0) * 0.35;
-        vec3 warmthColor = mix(vec3(0.28, 0.25, 0.16), vec3(0.70, 0.38, 0.12), goldenHour);
+        float sunWarmth = pow(clamp(cosSun * 0.5 + 0.5, 0.0, 1.0), 3.0) * 0.38;
+        vec3 warmthColor = mix(vec3(0.28, 0.25, 0.16), vec3(0.82, 0.46, 0.15), goldenHour);
         skyRgb += warmthColor * (sunWarmth * isDay);
 
         // Soft circumsolar corona glow
-        float corona = pow(clamp(cosSun, 0.0, 1.0), 24.0) * 0.70;
-        vec3 coronaCol = mix(vec3(1.2, 1.1, 0.9), vec3(1.8, 1.2, 0.5), goldenHour);
+        float corona = pow(clamp(cosSun, 0.0, 1.0), 24.0) * 0.85 + pow(clamp(cosSun, 0.0, 1.0), 180.0) * 2.5;
+        vec3 coronaCol = mix(vec3(1.8, 1.6, 1.2), vec3(3.2, 1.8, 0.6), goldenHour);
         skyRgb += coronaCol * (corona * isDay * sunIntensity);
     }
 
@@ -183,7 +183,7 @@ float linearizeDepth(float z_ndc) {
 // Robust Screen-Space Reflection (SSR) Ray Marcher
 // Reprojects each march step through MVP into screen UV + linear depth
 // -------------------------------------------------------------
-vec4 traceSSR(vec3 rayOrigin, vec3 rayDir, vec2 waveGrad) {
+vec4 traceSSR(vec3 rayOrigin, vec3 rayDir) {
     const float maxDist = 85.0;
     const int maxSteps = 40;
     float t = 0.25;
@@ -193,8 +193,8 @@ vec4 traceSSR(vec3 rayOrigin, vec3 rayDir, vec2 waveGrad) {
     vec2 hitUV = vec2(0.0);
     bool hitFound = false;
 
-    // Deflect ray in world space by local wave normals
-    vec3 marchDir = normalize(rayDir + vec3(waveGrad.x, 0.0, waveGrad.y) * 0.12);
+    // Direct ray march along the reflection ray without perturbation jitter
+    vec3 marchDir = normalize(rayDir);
 
     for (int i = 0; i < maxSteps && t < maxDist; ++i) {
         vec3 p = rayOrigin + marchDir * t;
@@ -287,7 +287,7 @@ vec4 traceSSR(vec3 rayOrigin, vec3 rayDir, vec2 waveGrad) {
 // -------------------------------------------------------------
 // Real-Time Screen-Space Reflection (SSR) & Sky Dome
 // -------------------------------------------------------------
-vec3 getReflectionColor(vec3 origin, vec3 R, vec3 L, float isDay, float sunIntensity, int waterQuality, vec2 waveGrad) {
+vec3 getReflectionColor(vec3 origin, vec3 R, vec3 L, float isDay, float sunIntensity, int waterQuality) {
     float goldenHour = smoothstep(0.40, 0.02, pc.dayInfo.y) * step(-0.06, pc.dayInfo.y);
     vec3 sky = computeProceduralSky(R, L, isDay, sunIntensity, goldenHour);
 
@@ -296,7 +296,7 @@ vec3 getReflectionColor(vec3 origin, vec3 R, vec3 L, float isDay, float sunInten
         float tCloud = (196.0 - origin.y) / max(R.y, 0.02);
         if (tCloud > 0.0 && tCloud < 6000.0) {
             vec3 pCloud = origin + R * tCloud;
-            vec2 wind = vec2(pc.camPos.w * 4.2, pc.camPos.w * 1.6);
+            vec2 wind = vec2(pc.camPos.w * 2.2, pc.camPos.w * 0.9);
             vec2 ws = pCloud.xz + wind;
 
             float macroNoise = cloudFBM(vec3(ws * 0.00028, 0.5));
@@ -304,7 +304,7 @@ vec3 getReflectionColor(vec3 origin, vec3 R, vec3 L, float isDay, float sunInten
                 float cDensity = smoothstep(0.22, 0.48, macroNoise);
                 float cAlpha = clamp(cDensity * 2.0, 0.0, 0.96);
                 float silver = pow(max(dot(R, L) * 0.5 + 0.5, 0.0), 3.0) * 0.70 + 0.85;
-                vec3 goldenCloud = mix(vec3(1.50, 1.45, 1.35), vec3(2.35, 1.55, 0.75), goldenHour);
+                vec3 goldenCloud = mix(vec3(1.50, 1.45, 1.35), vec3(2.40, 1.65, 0.85), goldenHour);
                 vec3 cloudLit = mix(vec3(0.25, 0.30, 0.42), goldenCloud * silver, isDay);
                 sky = mix(sky, cloudLit, cAlpha);
             }
@@ -313,7 +313,7 @@ vec3 getReflectionColor(vec3 origin, vec3 R, vec3 L, float isDay, float sunInten
 
     // 2. Real-time Screen Space Reflections for nearby geometry (river banks, trees, terrain)
     if (waterQuality >= 2) {
-        vec4 ssr = traceSSR(origin, R, waveGrad);
+        vec4 ssr = traceSSR(origin, R);
         if (ssr.a > 0.001) {
             sky = mix(sky, ssr.rgb, ssr.a);
         }
@@ -452,40 +452,40 @@ void main() {
     // 2. Physical Beer-Lambert Absorption (Red -> Green -> Blue)
     // -------------------------------------------------------------
     // Exponential extinction per color channel: red absorbs rapidly, green moderately, blue penetrates deeply
-    vec3 extinctionCoeff = vec3(0.40, 0.12, 0.03);
+    vec3 extinctionCoeff = vec3(0.48, 0.16, 0.04);
     vec3 transmittance = exp(-waterDepthMeters * extinctionCoeff);
 
-    // Color gradient: luminous turquoise/azure shallows to deep saturated oceanic sapphire navy
-    vec3 shallowWaterColor = mix(vec3(0.04, 0.28, 0.38), vec3(0.08, 0.42, 0.54), isDay);
-    vec3 deepWaterColor    = mix(vec3(0.003, 0.012, 0.050), vec3(0.010, 0.048, 0.185), isDay);
+    // Color gradient: clear luminous translucent teal shallows to deep saturated oceanic slate-blue / dark teal
+    vec3 shallowWaterColor = mix(vec3(0.055, 0.32, 0.38), vec3(0.075, 0.38, 0.46), isDay);
+    vec3 deepWaterColor    = mix(vec3(0.003, 0.015, 0.035), vec3(0.010, 0.062, 0.105), isDay);
 
-    // color = deepColor + (shallowColor - deepColor) * exp(-depth * extinctionCoeff)
+    // Deep water extinction: color = deepColor + (shallowColor - deepColor) * exp(-depth * extinctionCoeff)
     vec3 waterBedColor = deepWaterColor + (shallowWaterColor - deepWaterColor) * transmittance;
 
-    // Smooth physical shoreline opacity: 0% at zero depth (clear beach edge), rising smoothly to solid opaque in deep water
-    float baseAlpha = clamp(1.0 - exp(-waterDepthMeters * 0.75), 0.0, 0.96);
+    // Smooth physical shoreline opacity: 0% at zero depth (crystal clear beach edge), rising smoothly to deep water
+    float baseAlpha = clamp(1.0 - exp(-waterDepthMeters * 0.65), 0.0, 0.95);
 
     // -------------------------------------------------------------
-    // 3. Layered Micro Detail Ripples (High-Frequency Water Texture)
+    // 3. Layered Micro Detail Ripples (Fine Water Glint Texture)
     // -------------------------------------------------------------
-    float t = pc.camPos.w * 0.95;
+    float t = pc.camPos.w * 0.40;
     vec2 pos = fragWorldPos.xz;
     float distToCam = length(fragWorldPos - pc.camPos.xyz);
 
     // Micro layer 1: fine ripples scrolling along (0.8, 0.6)
-    vec2 uv1 = pos * 1.8 + vec2(t * 0.35, t * 0.25);
+    vec2 uv1 = pos * 1.2 + vec2(t * 0.20, t * 0.15);
     float r1_x = cos(uv1.x * 3.14 + sin(uv1.y * 2.1)) * 3.14;
     float r1_y = cos(uv1.y * 3.14 + cos(uv1.x * 2.1)) * 3.14;
-    vec2 microGrad1 = vec2(r1_x, r1_y) * 0.012;
+    vec2 microGrad1 = vec2(r1_x, r1_y) * 0.006;
 
     // Micro layer 2: cross-ripples rotated ~45 deg, scrolling along (-0.6, 0.8)
-    vec2 uv2 = vec2(pos.x * 0.707 - pos.y * 0.707, pos.x * 0.707 + pos.y * 0.707) * 3.2 - vec2(t * 0.28, -t * 0.38);
+    vec2 uv2 = vec2(pos.x * 0.707 - pos.y * 0.707, pos.x * 0.707 + pos.y * 0.707) * 2.2 - vec2(t * 0.15, -t * 0.22);
     float r2_x = sin(uv2.x * 3.14) * 3.14;
     float r2_y = cos(uv2.y * 3.14) * 3.14;
-    vec2 microGrad2 = vec2(r2_x, r2_y) * 0.008;
+    vec2 microGrad2 = vec2(r2_x, r2_y) * 0.004;
 
     // Distance fade for micro ripples to prevent distant aliasing/shimmering
-    float microFade = 1.0 - smoothstep(35.0, 180.0, distToCam);
+    float microFade = 1.0 - smoothstep(30.0, 160.0, distToCam);
     vec2 totalMicro = (microGrad1 + microGrad2) * microFade;
 
     // -------------------------------------------------------------
@@ -502,23 +502,39 @@ void main() {
         float fPhase1 = fract(t * 1.3 + 0.5);
         float fW0 = 1.0 - abs(fPhase0 - 0.5) * 2.0;
         float fW1 = 1.0 - abs(fPhase1 - 0.5) * 2.0;
-        float r0 = sin(dot(pos - fDir * fPhase0 * 1.6, fDir) * 4.5) * 0.035;
-        float r1 = sin(dot(pos - fDir * fPhase1 * 1.6, fDir) * 4.5) * 0.035;
+        float r0 = sin(dot(pos - fDir * fPhase0 * 1.6, fDir) * 4.5) * 0.025;
+        float r1 = sin(dot(pos - fDir * fPhase1 * 1.6, fDir) * 4.5) * 0.025;
         totalMicro += fDir * (r0 * fW0 + r1 * fW1);
     }
 
-    vec3 N = normalize(fragNormal);
+    vec3 rawNormal = normalize(fragNormal);
+
+    // -------------------------------------------------------------
+    // 5. DUAL-NORMAL PIPELINE:
+    // a) smoothNormal: Macro Gerstner normal gently low-passed towards (0, 1, 0).
+    //    ZERO micro-ripples! Fed to SSR reflect(-V, smoothNormal), ray march, and Fresnel.
+    //    This preserves mirror-coherent reflections of trees, mountains, and clouds!
+    // b) detailNormal: Macro Gerstner normal + micro ripples.
+    //    Used EXCLUSIVELY for GGX specular sun glints.
+    // -------------------------------------------------------------
+    vec3 smoothNormal;
+    vec3 detailNormal;
+
     if (isTopFace) {
-        // Perturb the smooth analytic Gerstner normal by micro ripples
-        N = normalize(vec3(N.x - totalMicro.x, N.y, N.z - totalMicro.y));
+        smoothNormal = normalize(mix(vec3(0.0, 1.0, 0.0), rawNormal, 0.35));
+        detailNormal = normalize(vec3(rawNormal.x - totalMicro.x, rawNormal.y, rawNormal.z - totalMicro.y));
     } else {
-        // Lateral water wall (waterfalls / edge drops): downward water ripple
         float downRipple = sin((fragWorldPos.y + t * 2.5) * 6.0) * 0.05;
-        N = normalize(vec3(fragNormal.x, downRipple, fragNormal.z));
+        smoothNormal = rawNormal;
+        detailNormal = normalize(vec3(rawNormal.x, downRipple, rawNormal.z));
     }
 
-    vec3 effN = viewingFromBelow ? -N : N;
-    float NdotV = clamp(dot(effN, V), 0.0, 1.0);
+    vec3 effSmoothN = viewingFromBelow ? -smoothNormal : smoothNormal;
+    float NdotV_smooth = clamp(dot(effSmoothN, V), 0.0, 1.0);
+
+    vec3 effDetailN = viewingFromBelow ? -detailNormal : detailNormal;
+    float NdotV_detail = clamp(dot(effDetailN, V), 0.001, 1.0);
+
     vec3 L = normalize(pc.sunDir.xyz);
 
     vec3 waterSurfaceColor;
@@ -526,65 +542,90 @@ void main() {
 
     if (viewingFromBelow || cameraUnderwater) {
         // -------------------------------------------------------------
-        // UNDERWATER VIEW: Snell's Window & Upward Caustic Beams
+        // UNDERWATER VIEW: Snell's Window & Total Internal Reflection (TIR)
         // -------------------------------------------------------------
-        float internalReflection = pow(1.0 - NdotV, 3.5);
-        float depthFac = clamp(waterDepthMeters / 6.0, 0.0, 1.0);
-        finalAlpha = mix(0.18, 0.65, internalReflection * depthFac);
+        // Water index of refraction n1 = 1.333, Air n2 = 1.0
+        // Surface normal pointing into water towards camera:
+        vec3 N_intoWater = -smoothNormal;
+        float cosIncidence = clamp(dot(-V, N_intoWater), 0.0, 1.0);
 
-        float underCaustic = pow(sin(pos.x * 2.5 + t * 1.5) * sin(pos.y * 2.5 + t * 1.2) * 0.5 + 0.5, 2.0) * 0.35 * sunIntensity;
-        vec3 sunBeams = mix(vec3(0.2, 0.4, 0.7), vec3(1.1, 1.05, 0.85), isDay) * underCaustic;
+        // Critical angle test: sin2_t = eta^2 * (1 - cosIncidence^2)
+        const float eta = 1.333;
+        float sin2_t = (eta * eta) * (1.0 - cosIncidence * cosIncidence);
+        bool isTIR = (sin2_t >= 1.0);
 
-        vec3 underWaterTint = mix(vec3(0.08, 0.35, 0.52), vec3(0.03, 0.16, 0.32), depthFac);
-        waterSurfaceColor = mix(underWaterTint, vec3(0.02, 0.08, 0.22), internalReflection * 0.7) + sunBeams;
+        vec3 underWaterTint = mix(vec3(0.012, 0.065, 0.11), vec3(0.005, 0.035, 0.075), clamp(waterDepthMeters / 6.0, 0.0, 1.0));
+        float goldenHour = smoothstep(0.40, 0.02, pc.dayInfo.y) * step(-0.06, pc.dayInfo.y);
+
+        if (isTIR) {
+            // Total Internal Reflection: surface mirrors the underwater floor with deep blue-green attenuation
+            waterSurfaceColor = mix(underWaterTint * 0.75, vec3(0.006, 0.038, 0.075), 0.5);
+            finalAlpha = 0.88;
+        } else {
+            // Inside Snell's Window: refract upward into the above-water sky/clouds
+            vec3 R_refract = refract(-V, N_intoWater, eta);
+            vec3 skyRefract = computeProceduralSky(R_refract, L, isDay, sunIntensity, goldenHour);
+
+            // Refraction distortion and surface caustics
+            float caustic = sin(pos.x * 2.5 + t * 1.5) * cos(pos.y * 2.5 + t * 1.2) * 0.5 + 0.5;
+            skyRefract += vec3(0.12, 0.18, 0.14) * (caustic * 0.18 * isDay);
+
+            waterSurfaceColor = mix(skyRefract, underWaterTint, 0.28);
+            finalAlpha = 0.60;
+        }
+
+        // Upward caustic sunlight beams shining down through water
+        float underCaustic = pow(sin(pos.x * 2.5 + t * 1.5) * sin(pos.y * 2.5 + t * 1.2) * 0.5 + 0.5, 2.0) * 0.28 * sunIntensity;
+        vec3 sunBeams = mix(vec3(0.15, 0.35, 0.55), vec3(0.95, 0.88, 0.65), isDay) * underCaustic;
+        waterSurfaceColor += sunBeams;
 
     } else {
         // -------------------------------------------------------------
-        // ABOVE WATER VIEW: Physical Schlick Fresnel & GGX Sun Reflection
+        // ABOVE WATER VIEW: Dual-Normal Coherent Reflections & GGX Sun Glints
         // -------------------------------------------------------------
-        // Smooth progressive Fresnel curve using the analytic wave normal
-        float fresnel = 0.04 + 0.96 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 3.0);
+        // 1. Schlick Fresnel evaluated with smooth macro normal (no micro noise!)
+        float fresnel = 0.04 + 0.96 * pow(clamp(1.0 - NdotV_smooth, 0.0, 1.0), 5.0);
 
-        // Trace screen-space reflection distorted by the wave normal
-        vec3 R = reflect(-V, effN);
-        vec3 reflectedScene = getReflectionColor(fragWorldPos, R, L, isDay, sunIntensity, optWaterQuality, totalMicro);
+        // 2. Mirror-coherent Screen-Space Reflection using smooth normal
+        vec3 R = reflect(-V, effSmoothN);
+        vec3 reflectedScene = getReflectionColor(fragWorldPos, R, L, isDay, sunIntensity, optWaterQuality);
 
-        // GGX Microfacet Specular Sun Reflection (Glittering Sun Glint)
+        // 3. GGX Microfacet Specular Sun Reflection using DETAIL NORMAL
+        // Gives glistening sun sparkle across the surface without perturbing reflected trees/clouds
         vec3 H = normalize(L + V);
         float goldenHour = smoothstep(0.40, 0.02, pc.dayInfo.y) * step(-0.06, pc.dayInfo.y);
 
-        float roughness = 0.045; // Smooth liquid surface for crisp, glistening sun reflections
-        float D = DistributionGGX(effN, H, roughness);
-        float G = GeometrySmith(effN, V, L, roughness);
+        float roughness = 0.038;
+        float D = DistributionGGX(effDetailN, H, roughness);
+        float G = GeometrySmith(effDetailN, V, L, roughness);
         float F_sun = 0.04 + 0.96 * pow(1.0 - max(dot(V, H), 0.0), 5.0);
 
-        float NdotL = max(dot(effN, L), 0.0);
-        float specularGGX = (D * F_sun * G) / (4.0 * max(NdotV, 0.001) * max(NdotL, 0.001) + 0.0001);
+        float NdotL = max(dot(effDetailN, L), 0.0);
+        float specularGGX = (D * F_sun * G) / (4.0 * max(NdotV_detail, 0.001) * max(NdotL, 0.001) + 0.0001);
 
-        float rtShadow = vibrant ? sampleRealtimeShadow(fragWorldPos, effN, L) : 1.0;
-        vec3 sunGlintColor = mix(vec3(2.60, 2.45, 2.20), vec3(3.60, 2.30, 0.95), goldenHour);
+        float rtShadow = vibrant ? sampleRealtimeShadow(fragWorldPos, effDetailN, L) : 1.0;
+        vec3 sunGlintColor = mix(vec3(2.80, 2.60, 2.30), vec3(4.20, 2.80, 1.20), goldenHour);
         vec3 sunGlint = specularGGX * NdotL * sunIntensity * sunGlintColor * isDay * rtShadow;
 
         // Subsurface Water Scattering: subtle emerald glow through wave crests
         vec3 sssColor = vec3(0.0);
         if (vibrant && optWaterQuality >= 2) {
-            float sss = pow(clamp(dot(V, -L), 0.0, 1.0), 3.5) * exp(-waterDepthMeters * 0.25) * 0.25 * isDay;
-            sssColor = vec3(0.02, 0.12, 0.16) * sss * rtShadow;
+            float sss = pow(clamp(dot(V, -L), 0.0, 1.0), 3.5) * exp(-waterDepthMeters * 0.25) * 0.20 * isDay;
+            sssColor = vec3(0.015, 0.10, 0.14) * sss * rtShadow;
         }
 
         // Shoreline Foam Wash where continuous water depth drops below 0.35m
         float shoreFoamMask = smoothstep(0.35, 0.02, waterDepthMeters);
         float foamNoise = sin(pos.x * 3.5 + t * 1.8) * cos(pos.y * 3.5 - t * 1.5) * 0.5 + 0.5;
         float foam = shoreFoamMask * smoothstep(0.30, 0.75, foamNoise) * isDay;
-        vec3 foamColor = vec3(0.95, 0.98, 1.0) * (foam * 0.45);
+        vec3 foamColor = vec3(0.95, 0.98, 1.0) * (foam * 0.40);
 
-        // Vibrant Aquatic Reflection onto Rich Ocean Water
-        vec3 reflTint = mix(vec3(0.70, 0.85, 1.05), vec3(0.98, 0.99, 1.0), fresnel);
+        // Aquatic Reflection onto Rich Ocean Water
+        vec3 reflTint = mix(vec3(0.75, 0.88, 1.02), vec3(0.98, 0.99, 1.0), fresnel);
         vec3 reflColor = reflectedScene * reflTint;
 
-        // Balanced Fresnel mix: looking down keeps rich turquoise/deep-blue body prominent,
-        // grazing angles smoothly transition to sky reflection
-        float reflFactor = clamp(fresnel * 0.70 + 0.16, 0.0, 0.88);
+        // Balanced Fresnel mix: looking down keeps rich dark teal body prominent, grazing angles transition to mirror reflection
+        float reflFactor = clamp(fresnel * 0.85 + 0.06, 0.0, 0.92);
 
         waterSurfaceColor = mix(waterBedColor, reflColor, reflFactor) + sunGlint + foamColor + sssColor;
         finalAlpha = clamp(baseAlpha + fresnel * (1.0 - baseAlpha) + foam * 0.30, 0.0, 0.96);

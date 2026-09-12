@@ -568,7 +568,7 @@ void run() {
     int fpsFrameCount = 0;
     float displayedFPS = 60.0f;
     float menuCamAngle = 0.0f;
-    float timeOfDay = 0.0f; // Start at Noon
+    float timeOfDay = 0.19f; // Start at golden hour / late afternoon (matches visual reference)
     
     bool isChatOpen = false;
     std::string chatInput = "";
@@ -663,7 +663,7 @@ void run() {
         Cell camBlock = world->getCell(camCell.x, camCell.y, camCell.z, camCell.s);
         bool isUnderwater = (camBlock.type == BlockType::Water);
         if (isUnderwater) {
-            skyColor = glm::vec3(0.02f, 0.16f, 0.44f); // Deep oceanic blue matching Image 3
+            skyColor = glm::vec3(0.012f, 0.065f, 0.110f); // Deep oceanic slate-blue underwater fog
         }
         float maxVisibleDist = static_cast<float>(world->renderDistance * 16);
         float fogDistance = isUnderwater ? 24.0f : (maxVisibleDist * 0.92f);

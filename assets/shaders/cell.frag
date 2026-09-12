@@ -503,8 +503,8 @@ void main() {
     if (cameraUnderwater) {
         float dist = length(fragWorldPos - pc.camPos.xyz);
         float uFactor = smoothstep(2.0, 24.0, dist);
-        linearSceneColor = mix(surfaceRadiance, vec3(0.005, 0.035, 0.12), uFactor);
-        linearSceneColor = mix(linearSceneColor, vec3(0.005, 0.025, 0.08), 0.32);
+        linearSceneColor = mix(surfaceRadiance, vec3(0.012, 0.065, 0.110), uFactor);
+        linearSceneColor = mix(linearSceneColor, vec3(0.005, 0.035, 0.075), 0.32);
     } else {
         linearSceneColor = applyHorizonDistanceFog(
             surfaceRadiance,

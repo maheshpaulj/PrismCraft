@@ -47,7 +47,7 @@ vec3 triangularDither(vec3 color, vec2 uv) {
 // Soft-knee threshold extraction for subtle highlight bloom (sun disc, glowing torches, water glints)
 vec3 extractBloom(vec3 c) {
     float brightness = max(c.r, max(c.g, c.b));
-    const float threshold = 1.85;
+    const float threshold = 1.65;
     const float knee = 0.40;
     float soft = brightness - threshold + knee;
     soft = clamp(soft, 0.0, 2.0 * knee);
@@ -107,9 +107,9 @@ void main() {
 
         // Minecraft Vibrant Visuals: rich saturated colors with warm solar highlights
         float luma = dot(tonemapped, vec3(0.2126, 0.7152, 0.0722));
-        vec3 vibranceBoost = mix(vec3(luma), tonemapped, 1.14);
-        vec3 warmTint = vec3(1.03, 1.015, 0.97);
-        tonemapped = mix(vibranceBoost, vibranceBoost * warmTint, clamp(luma * 0.6, 0.0, 1.0));
+        vec3 vibranceBoost = mix(vec3(luma), tonemapped, 1.15);
+        vec3 warmTint = vec3(1.035, 1.015, 0.965);
+        tonemapped = mix(vibranceBoost, vibranceBoost * warmTint, clamp(luma * 0.7, 0.0, 1.0));
     }
 
     // -------------------------------------------------------------

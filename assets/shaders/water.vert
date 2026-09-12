@@ -37,16 +37,16 @@ void main() {
 
     // Geometric Gerstner macro wave displacement for water surfaces and top rims
     if (inNormal.y > 0.2) {
-        float t = pc.camPos.w * 0.95;
+        float t = pc.camPos.w * 0.40;
         vec2 p = inPosition.xz;
         float regPhase = getRegionPhase(p);
 
-        // 4 varied non-aligned Gerstner waves
+        // 4 varied non-aligned Gerstner waves: broad, calm rolling swells
         // Direction, wavenumber k=2pi/lambda, amplitude a, speed s, steepness Q
-        vec2 d0 = vec2(0.9578, 0.2873);  float k0 = 0.2416; float a0 = 0.048; float s0 = 1.20; float Q0 = 0.40;
-        vec2 d1 = vec2(-0.4061, 0.9138); float k1 = 0.4189; float a1 = 0.030; float s1 = 1.45; float Q1 = 0.45;
-        vec2 d2 = vec2(0.7071, -0.7071); float k2 = 0.7392; float a2 = 0.018; float s2 = 1.80; float Q2 = 0.50;
-        vec2 d3 = vec2(-0.8480, -0.5300);float k3 = 1.3963; float a3 = 0.009; float s3 = 2.25; float Q3 = 0.55;
+        vec2 d0 = vec2(0.8944, 0.4472);  float k0 = 0.1208; float a0 = 0.015; float s0 = 0.35; float Q0 = 0.25;
+        vec2 d1 = vec2(-0.3846, 0.9231); float k1 = 0.1745; float a1 = 0.010; float s1 = 0.45; float Q1 = 0.25;
+        vec2 d2 = vec2(0.7071, -0.7071); float k2 = 0.2618; float a2 = 0.006; float s2 = 0.55; float Q2 = 0.20;
+        vec2 d3 = vec2(-0.7809, -0.6247);float k3 = 0.3927; float a3 = 0.003; float s3 = 0.65; float Q3 = 0.15;
 
         float phi0 = dot(p, d0) * k0 - t * s0 + regPhase;
         float phi1 = dot(p, d1) * k1 - t * s1 + regPhase * 0.7;

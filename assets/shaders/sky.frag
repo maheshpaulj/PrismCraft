@@ -129,13 +129,13 @@ void main() {
     float cosTheta = dot(V, L);
 
     // A. Broad atmospheric solar warmth across the sun-facing hemisphere
-    float sunWarmth = pow(clamp(cosTheta * 0.5 + 0.5, 0.0, 1.0), 3.0) * 0.35;
-    vec3 warmthColor = mix(vec3(0.28, 0.25, 0.16), vec3(0.70, 0.38, 0.12), goldenHour);
+    float sunWarmth = pow(clamp(cosTheta * 0.5 + 0.5, 0.0, 1.0), 3.0) * 0.38;
+    vec3 warmthColor = mix(vec3(0.28, 0.25, 0.16), vec3(0.82, 0.46, 0.15), goldenHour);
     skyRgb += warmthColor * (sunWarmth * isDay);
 
     // B. Circumsolar corona / solar aureole around the sun disc
-    float corona = pow(clamp(cosTheta, 0.0, 1.0), 28.0) * 0.75 + pow(clamp(cosTheta, 0.0, 1.0), 180.0) * 2.2;
-    vec3 coronaColor = mix(vec3(1.8, 1.6, 1.2), vec3(2.6, 1.5, 0.45), goldenHour);
+    float corona = pow(clamp(cosTheta, 0.0, 1.0), 28.0) * 0.85 + pow(clamp(cosTheta, 0.0, 1.0), 180.0) * 2.5;
+    vec3 coronaColor = mix(vec3(1.8, 1.6, 1.2), vec3(3.2, 1.8, 0.6), goldenHour);
     skyRgb += coronaColor * (corona * isDay * sunIntensity);
 
     // C. Anti-solar horizon arch (Belt of Venus) opposite setting sun
