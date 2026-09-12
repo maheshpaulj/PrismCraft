@@ -447,6 +447,50 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                         return glm::vec2(0.0f);
                     };
 
+                    // Minecraft-style corner height averaging for seamless flowing water slopes
+                    auto getCornerWaterHeight = [&](float vx, float vz, int ySurf) -> float {
+                        float sumHeight = 0.0f;
+                        int waterCount = 0;
+                        bool hasWaterAbove = false;
+
+                        CellCoord seen[6];
+                        int numSeen = 0;
+
+                        for (int i = 0; i < 6; ++i) {
+                            glm::vec3 probePos(vx + triSectorAngles[i][0] * 0.25f, static_cast<float>(ySurf) + 0.5f, vz + triSectorAngles[i][1] * 0.25f);
+                            CellCoord sc = worldToCell(probePos);
+
+                            bool already = false;
+                            for (int k = 0; k < numSeen; ++k) {
+                                if (seen[k] == sc) { already = true; break; }
+                            }
+                            if (already) continue;
+                            seen[numSeen++] = sc;
+
+                            // If any touching column has water in the layer above, this corner connects to that waterfall column
+                            Cell cAbove = getCellAtWorld(sc.x, ySurf + 1, sc.z, sc.s);
+                            if (cAbove.type == BlockType::Water) {
+                                hasWaterAbove = true;
+                            }
+
+                            Cell c = getCellAtWorld(sc.x, ySurf, sc.z, sc.s);
+                            if (c.type == BlockType::Water) {
+                                float h = (c.level == 0) ? 0.90f : std::max(0.20f, 0.90f - static_cast<float>(c.level) * 0.10f);
+                                sumHeight += h;
+                                waterCount++;
+                            }
+                        }
+
+                        if (hasWaterAbove) {
+                            return 1.0f;
+                        }
+
+                        if (waterCount > 0) {
+                            return sumHeight / static_cast<float>(waterCount);
+                        }
+                        return 0.90f;
+                    };
+
                     // ---------------------------------------------------------
                     // Face 0: Top face (+Y)
                     // ---------------------------------------------------------
@@ -477,11 +521,14 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                             glm::vec3 waterCol1(d1, sun1, t1);
                             glm::vec3 waterCol2(d2, sun2, t2);
 
-                            // Solid, deterministic water height: 0.90 for source, flowing water drops by level
-                            float waterHeight = (cell.level == 0) ? 0.90f : std::max(0.20f, 0.90f - static_cast<float>(cell.level) * 0.10f);
-                            glm::vec3 W0(vXZ[0].x, py + waterHeight, vXZ[0].y);
-                            glm::vec3 W1(vXZ[1].x, py + waterHeight, vXZ[1].y);
-                            glm::vec3 W2(vXZ[2].x, py + waterHeight, vXZ[2].y);
+                            // Seamless corner-averaged water height (identical across shared triangle vertices)
+                            float h0 = getCornerWaterHeight(vXZ[0].x, vXZ[0].y, y);
+                            float h1 = getCornerWaterHeight(vXZ[1].x, vXZ[1].y, y);
+                            float h2 = getCornerWaterHeight(vXZ[2].x, vXZ[2].y, y);
+
+                            glm::vec3 W0(vXZ[0].x, py + h0, vXZ[0].y);
+                            glm::vec3 W1(vXZ[1].x, py + h1, vXZ[1].y);
+                            glm::vec3 W2(vXZ[2].x, py + h2, vXZ[2].y);
 
                             // Flow vector passed via normal.xz (zero for still water, directional for flowing)
                             glm::vec2 flowVec = getWaterFlowVector(wx, y, wz, s, cell);
@@ -571,10 +618,12 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                             glm::vec3 wc_T1(d1, sun_T1, t_T1);
                             glm::vec3 wc_B1(d1, sun_B1, t_B1);
                             bool hasWaterAbove = (getCellAtWorld(wx, y + 1, wz, s).type == BlockType::Water);
-                            float waterHeight = (cell.level == 0) ? 0.90f : std::max(0.20f, 0.90f - static_cast<float>(cell.level) * 0.10f);
-                            float topY = hasWaterAbove ? (py + 1.0f) : (py + waterHeight);
-                            glm::vec3 wT0 = vT0; wT0.y = topY;
-                            glm::vec3 wT1 = vT1; wT1.y = topY;
+                            float h0 = getCornerWaterHeight(vB0.x, vB0.z, y);
+                            float h1 = getCornerWaterHeight(vB1.x, vB1.z, y);
+                            float topY0 = hasWaterAbove ? (py + 1.0f) : (py + h0);
+                            float topY1 = hasWaterAbove ? (py + 1.0f) : (py + h1);
+                            glm::vec3 wT0 = vT0; wT0.y = topY0;
+                            glm::vec3 wT1 = vT1; wT1.y = topY1;
                             glm::vec3 normTop = hasWaterAbove ? wallNorm : glm::vec3(wallNorm.x, 0.5f, wallNorm.z);
                             addWaterWallQuad(vB0, wT0, wT1, vB1, uv, wallNorm, normTop, wc_B0, wc_T0, wc_T1, wc_B1);
                         } else {

@@ -311,6 +311,14 @@ vec3 getReflectionColor(vec3 origin, vec3 R, vec3 L, float isDay, float sunInten
         }
     }
 
+    // 2. Real-time Screen Space Reflections for nearby geometry (river banks, trees, terrain)
+    if (waterQuality >= 2) {
+        vec4 ssr = traceSSR(origin, R, waveGrad);
+        if (ssr.a > 0.001) {
+            sky = mix(sky, ssr.rgb, ssr.a);
+        }
+    }
+
     return sky;
 }
 
@@ -431,14 +439,14 @@ void main() {
     // -------------------------------------------------------------
     // 1. Physically-Calibrated Beer-Lambert Depth Absorption
     // -------------------------------------------------------------
-    vec3 sigmaA = vec3(0.45, 0.18, 0.06);
+    vec3 sigmaA = vec3(0.38, 0.14, 0.04);
     float waterDepthMeters = depthFactor * 8.0;
     vec3 transmittance = exp(-waterDepthMeters * sigmaA);
 
     // Deep ocean bed: rich oceanic sapphire navy (sea dark blue)
-    vec3 deepWaterRadiance = mix(vec3(0.005, 0.018, 0.055), vec3(0.016, 0.065, 0.185), isDay);
+    vec3 deepWaterRadiance = mix(vec3(0.004, 0.018, 0.070), vec3(0.015, 0.075, 0.260), isDay);
     // Shallow waterbed: luminous marine azure / cyan-blue
-    vec3 shallowWaterRadiance = mix(vec3(0.010, 0.038, 0.085), vec3(0.032, 0.125, 0.265), isDay);
+    vec3 shallowWaterRadiance = mix(vec3(0.010, 0.045, 0.110), vec3(0.045, 0.165, 0.380), isDay);
 
     vec3 waterBedColor = mix(deepWaterRadiance, shallowWaterRadiance, transmittance);
 
@@ -448,37 +456,44 @@ void main() {
     float baseAlpha = mix(0.55, 0.95, smoothstep(0.02, 0.50, depthFactor)) * shoreEdge;
 
     // -------------------------------------------------------------
-    // 2. Broad Ocean Swells (Vast, Cohesive, Natural Water Body)
+    // 2. Broad Ocean Swells & Dynamic Waves (Natural, Rolling Ocean Water)
     // -------------------------------------------------------------
     float t = pc.camPos.w * 0.95;
     vec2 pos = fragWorldPos.xz;
     float distToCam = length(fragWorldPos - pc.camPos.xyz);
 
-    // Swell 1: Primary deep ocean swell (Wavelength = 36m, gentle amplitude)
+    // Swell 1: Primary deep ocean swell (Wavelength = 32m)
     vec2  d1 = vec2(0.8, 0.6);
-    float k1 = 0.1745;
-    float a1 = 0.038;
+    float k1 = 0.1963;
+    float a1 = 0.055;
     float w1 = dot(pos, d1) * k1 - t * 1.25;
 
-    // Swell 2: Secondary diagonal roll (Wavelength = 22m)
+    // Swell 2: Secondary diagonal roll (Wavelength = 19m)
     vec2  d2 = vec2(-0.6, 0.8);
-    float k2 = 0.2856;
-    float a2 = 0.024;
-    float w2 = dot(pos, d2) * k2 + t * 1.50;
+    float k2 = 0.3307;
+    float a2 = 0.036;
+    float w2 = dot(pos, d2) * k2 + t * 1.45;
 
-    // Swell 3: Soft ambient cross-swell (Wavelength = 14m)
+    // Swell 3: Soft ambient cross-swell (Wavelength = 11m)
     vec2  d3 = vec2(0.5, -0.86);
-    float k3 = 0.4488;
-    float a3 = 0.012;
-    float w3 = dot(pos, d3) * k3 - t * 1.90;
+    float k3 = 0.5712;
+    float a3 = 0.022;
+    float w3 = dot(pos, d3) * k3 - t * 1.85;
+
+    // Swell 4: Surface ripple roll (Wavelength = 5.5m)
+    vec2  d4 = vec2(-0.7071, -0.7071);
+    float k4 = 1.1424;
+    float a4 = 0.012;
+    float w4 = dot(pos, d4) * k4 + t * 2.30;
 
     // Distance LOD fade: smoothly calm ripples at distance to eliminate shimmering
-    float fadeDist = 1.0 - smoothstep(60.0, 300.0, distToCam);
+    float fadeDist = 1.0 - smoothstep(60.0, 320.0, distToCam);
 
-    // Subtle wave gradient (normal slope) - gentle, broad, NO zebra stripes
+    // Dynamic wave gradient (normal slope) with clearly defined rolling waves and glistening crests
     vec2 waveGrad = (d1 * (cos(w1) * k1 * a1) +
                      d2 * (cos(w2) * k2 * a2) +
-                     d3 * (cos(w3) * k3 * a3) * fadeDist) * 0.65;
+                     d3 * (cos(w3) * k3 * a3) +
+                     d4 * (cos(w4) * k4 * a4) * fadeDist) * 1.10;
 
     // -------------------------------------------------------------
     // 3. Directional Flow Currents for Streams & Waterfalls
@@ -537,9 +552,8 @@ void main() {
         // -------------------------------------------------------------
         // ABOVE WATER VIEW: Physical Schlick Fresnel & GGX Sun Reflection
         // -------------------------------------------------------------
-        // Generous base reflection so clouds and sky reflection NEVER vanish when looking straight down!
-        const float F0 = 0.38;
-        float fresnel = F0 + (1.0 - F0) * pow(clamp(1.0 - NdotV, 0.0, 1.0), 2.8);
+        // Smooth progressive Fresnel curve (water builds reflection across the lake)
+        float fresnel = 0.05 + 0.95 * pow(clamp(1.0 - NdotV, 0.0, 1.0), 2.2);
 
         // Trace screen-space planar reflection (trees, hills, shoreline, clouds)
         vec3 R = reflect(-V, effN);
@@ -575,20 +589,20 @@ void main() {
         vec3 foamColor = vec3(0.92, 0.96, 1.0) * (foam * 0.40);
 
         // -------------------------------------------------------------
-        // Multiply-Style Reflection onto Sea Dark Blue Water Surface
+        // Vibrant Aquatic Reflection onto Rich Ocean Deep Blue Water Surface
         // -------------------------------------------------------------
-        // Water is NOT a flat chrome mirror.
-        // The reflection softly illuminates and multiplies onto the rich oceanic blue water surface.
-        vec3 waterReflectTint = mix(vec3(0.40, 0.60, 0.85), vec3(0.70, 0.85, 1.05), isDay);
-        vec3 tintedReflect = reflectedScene * waterReflectTint;
+        // Reflected clouds and sky are clearly visible on the surface with natural aquatic tinting.
+        // The water retains its deep sapphire oceanic body and never looks like a flat silver mirror.
+        vec3 reflTint = mix(vec3(0.70, 0.85, 1.05), vec3(0.95, 0.98, 1.0), fresnel);
+        vec3 reflColor = reflectedScene * reflTint;
 
-        // Multiply component: clouds and bright sky illuminate the water surface
-        vec3 multipliedWater = waterBedColor * (0.65 + tintedReflect * 0.85);
+        // Balanced Fresnel mix:
+        // - Steep angles (looking down): deep blue water bed dominates (~75%),
+        //   while sky & cloud reflections are clearly visible (~25%) without washing out the blue.
+        // - Grazing angles (looking across): reflections reach up to 88%.
+        float reflFactor = clamp(fresnel * 0.65 + 0.22, 0.0, 0.88);
 
-        // Soft specular reflection sheen from Fresnel (clouds and sky highlights softly glistening)
-        vec3 specularSheen = tintedReflect * (fresnel * 0.32);
-
-        waterSurfaceColor = multipliedWater + specularSheen + sunGlint + foamColor + sssColor;
+        waterSurfaceColor = mix(waterBedColor, reflColor, reflFactor) + sunGlint + foamColor + sssColor;
         finalAlpha = clamp(baseAlpha + fresnel * (1.0 - baseAlpha) + foam * 0.30, 0.40, 0.96);
     }
 

@@ -34,23 +34,28 @@ void main() {
         float t = pc.camPos.w * 0.95;
         vec2 p = inPosition.xz;
 
-        // 3 broad gentle ocean swells (calm, cohesive, vast water body)
+        // 4 synchronized ocean swells matching water.frag 1:1
         vec2 d1 = vec2(0.8, 0.6);
-        float k1 = 0.1745;
-        float a1 = 0.038;
+        float k1 = 0.1963;
+        float a1 = 0.055;
         float w1 = dot(p, d1) * k1 - t * 1.25;
 
         vec2 d2 = vec2(-0.6, 0.8);
-        float k2 = 0.2856;
-        float a2 = 0.024;
-        float w2 = dot(p, d2) * k2 + t * 1.50;
+        float k2 = 0.3307;
+        float a2 = 0.036;
+        float w2 = dot(p, d2) * k2 + t * 1.45;
 
         vec2 d3 = vec2(0.5, -0.86);
-        float k3 = 0.4488;
-        float a3 = 0.012;
-        float w3 = dot(p, d3) * k3 - t * 1.90;
+        float k3 = 0.5712;
+        float a3 = 0.022;
+        float w3 = dot(p, d3) * k3 - t * 1.85;
 
-        float waveHeight = sin(w1) * a1 + sin(w2) * a2 + sin(w3) * a3;
+        vec2 d4 = vec2(-0.7071, -0.7071);
+        float k4 = 1.1424;
+        float a4 = 0.012;
+        float w4 = dot(p, d4) * k4 + t * 2.30;
+
+        float waveHeight = sin(w1) * a1 + sin(w2) * a2 + sin(w3) * a3 + sin(w4) * a4;
         worldPos.y += waveHeight;
     }
 
