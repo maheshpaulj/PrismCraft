@@ -25,43 +25,70 @@ layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec3 fragColor;
 layout(location = 3) out vec3 fragWorldPos;
 
+// Regional world phase offset so distinct lakes/rivers don't animate in rigid lockstep
+float getRegionPhase(vec2 p) {
+    vec2 cell = floor(p / 48.0);
+    return fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453) * 6.2831853;
+}
+
 void main() {
     vec3 worldPos = inPosition;
+    vec3 outNorm = inNormal;
 
-    // Physical vertex wave displacement for top water surfaces and wall top rims
-    // Synchronized 1:1 with wave normals in water.frag
+    // Geometric Gerstner macro wave displacement for water surfaces and top rims
     if (inNormal.y > 0.2) {
         float t = pc.camPos.w * 0.95;
         vec2 p = inPosition.xz;
+        float regPhase = getRegionPhase(p);
 
-        // 4 synchronized ocean swells matching water.frag 1:1
-        vec2 d1 = vec2(0.8, 0.6);
-        float k1 = 0.1963;
-        float a1 = 0.055;
-        float w1 = dot(p, d1) * k1 - t * 1.25;
+        // 4 varied non-aligned Gerstner waves
+        // Direction, wavenumber k=2pi/lambda, amplitude a, speed s, steepness Q
+        vec2 d0 = vec2(0.9578, 0.2873);  float k0 = 0.2416; float a0 = 0.048; float s0 = 1.20; float Q0 = 0.40;
+        vec2 d1 = vec2(-0.4061, 0.9138); float k1 = 0.4189; float a1 = 0.030; float s1 = 1.45; float Q1 = 0.45;
+        vec2 d2 = vec2(0.7071, -0.7071); float k2 = 0.7392; float a2 = 0.018; float s2 = 1.80; float Q2 = 0.50;
+        vec2 d3 = vec2(-0.8480, -0.5300);float k3 = 1.3963; float a3 = 0.009; float s3 = 2.25; float Q3 = 0.55;
 
-        vec2 d2 = vec2(-0.6, 0.8);
-        float k2 = 0.3307;
-        float a2 = 0.036;
-        float w2 = dot(p, d2) * k2 + t * 1.45;
+        float phi0 = dot(p, d0) * k0 - t * s0 + regPhase;
+        float phi1 = dot(p, d1) * k1 - t * s1 + regPhase * 0.7;
+        float phi2 = dot(p, d2) * k2 + t * s2 + regPhase * 1.3;
+        float phi3 = dot(p, d3) * k3 - t * s3 + regPhase * 0.5;
 
-        vec2 d3 = vec2(0.5, -0.86);
-        float k3 = 0.5712;
-        float a3 = 0.022;
-        float w3 = dot(p, d3) * k3 - t * 1.85;
+        float c0 = cos(phi0); float s_0 = sin(phi0);
+        float c1 = cos(phi1); float s_1 = sin(phi1);
+        float c2 = cos(phi2); float s_2 = sin(phi2);
+        float c3 = cos(phi3); float s_3 = sin(phi3);
 
-        vec2 d4 = vec2(-0.7071, -0.7071);
-        float k4 = 1.1424;
-        float a4 = 0.012;
-        float w4 = dot(p, d4) * k4 + t * 2.30;
+        // Vertical displacement (waves roll up and down)
+        float dy = a0 * s_0 + a1 * s_1 + a2 * s_2 + a3 * s_3;
 
-        float waveHeight = sin(w1) * a1 + sin(w2) * a2 + sin(w3) * a3 + sin(w4) * a4;
-        worldPos.y += waveHeight;
+        // Horizontal Gerstner trochoid displacement (sharpens crests, flattens troughs)
+        float dx = -(Q0 * a0 * d0.x * c0 + Q1 * a1 * d1.x * c1 + Q2 * a2 * d2.x * c2 + Q3 * a3 * d3.x * c3);
+        float dz = -(Q0 * a0 * d0.y * c0 + Q1 * a1 * d1.y * c1 + Q2 * a2 * d2.y * c2 + Q3 * a3 * d3.y * c3);
+
+        worldPos.y += dy;
+        worldPos.x += dx;
+        worldPos.z += dz;
+
+        // Analytic Gerstner normal from wave partial derivatives
+        if (inNormal.y > 0.7) {
+            float nx = -(d0.x * k0 * a0 * c0 + d1.x * k1 * a1 * c1 + d2.x * k2 * a2 * c2 + d3.x * k3 * a3 * c3);
+            float nz = -(d0.y * k0 * a0 * c0 + d1.y * k1 * a1 * c1 + d2.y * k2 * a2 * c2 + d3.y * k3 * a3 * c3);
+            float ny = 1.0 - (Q0 * k0 * a0 * s_0 + Q1 * k1 * a1 * s_1 + Q2 * k2 * a2 * s_2 + Q3 * k3 * a3 * s_3);
+
+            vec3 waveNorm = normalize(vec3(nx, ny, nz));
+
+            // Blend flow direction if flowing
+            if (length(inNormal.xz) > 0.02) {
+                outNorm = normalize(vec3(inNormal.x + waveNorm.x * 0.5, 1.0, inNormal.z + waveNorm.z * 0.5));
+            } else {
+                outNorm = waveNorm;
+            }
+        }
     }
 
     gl_Position = pc.mvp * vec4(worldPos, 1.0);
     fragTexCoord = inTexCoord;
-    fragNormal = inNormal;
+    fragNormal = outNorm;
     fragColor = inColor;
     fragWorldPos = worldPos;
 }

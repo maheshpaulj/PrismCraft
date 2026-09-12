@@ -514,12 +514,9 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                         auto [sun2, t2] = getVertexLight(T2, nTop);
 
                         if (isWaterBlock) {
-                            float d0 = getWaterDepthAt(vXZ[0].x, vXZ[0].y, y);
-                            float d1 = getWaterDepthAt(vXZ[1].x, vXZ[1].y, y);
-                            float d2 = getWaterDepthAt(vXZ[2].x, vXZ[2].y, y);
-                            glm::vec3 waterCol0(d0, sun0, t0);
-                            glm::vec3 waterCol1(d1, sun1, t1);
-                            glm::vec3 waterCol2(d2, sun2, t2);
+                            glm::vec3 waterCol0(1.0f, sun0, t0);
+                            glm::vec3 waterCol1(1.0f, sun1, t1);
+                            glm::vec3 waterCol2(1.0f, sun2, t2);
 
                             // Seamless corner-averaged water height (identical across shared triangle vertices)
                             float h0 = getCornerWaterHeight(vXZ[0].x, vXZ[0].y, y);
@@ -611,12 +608,10 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                         auto [sun_B1, t_B1] = getVertexLight(vB1, wallNorm);
 
                         if (isWaterBlock) {
-                            float d0 = getWaterDepthAt(vB0.x, vB0.z, y);
-                            float d1 = getWaterDepthAt(vB1.x, vB1.z, y);
-                            glm::vec3 wc_B0(d0, sun_B0, t_B0);
-                            glm::vec3 wc_T0(d0, sun_T0, t_T0);
-                            glm::vec3 wc_T1(d1, sun_T1, t_T1);
-                            glm::vec3 wc_B1(d1, sun_B1, t_B1);
+                            glm::vec3 wc_B0(1.0f, sun_B0, t_B0);
+                            glm::vec3 wc_T0(1.0f, sun_T0, t_T0);
+                            glm::vec3 wc_T1(1.0f, sun_T1, t_T1);
+                            glm::vec3 wc_B1(1.0f, sun_B1, t_B1);
                             bool hasWaterAbove = (getCellAtWorld(wx, y + 1, wz, s).type == BlockType::Water);
                             float h0 = getCornerWaterHeight(vB0.x, vB0.z, y);
                             float h1 = getCornerWaterHeight(vB1.x, vB1.z, y);
