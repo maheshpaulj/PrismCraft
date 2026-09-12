@@ -31,15 +31,15 @@ void main() {
 
     // Geometric Gerstner macro wave displacement for water surfaces and top rims
     if (inNormal.y > 0.2) {
-        float t = pc.camPos.w * 0.35;
+        float t = pc.camPos.w * 0.95;
         vec2 p = inPosition.xz;
 
-        // 4 varied non-aligned Gerstner waves: broad, calm rolling swells
+        // 4 varied non-aligned Gerstner waves: broad, natural rolling swells
         // Direction, wavenumber k=2pi/lambda, amplitude a, speed s
-        vec2 d0 = vec2(0.8944, 0.4472);  float k0 = 0.1142; float a0 = 0.014; float s0 = 0.32;
-        vec2 d1 = vec2(-0.3846, 0.9231); float k1 = 0.1653; float a1 = 0.009; float s1 = 0.42;
-        vec2 d2 = vec2(0.7071, -0.7071); float k2 = 0.2513; float a2 = 0.005; float s2 = 0.52;
-        vec2 d3 = vec2(-0.7809, -0.6247);float k3 = 0.3700; float a3 = 0.002; float s3 = 0.62;
+        vec2 d0 = vec2(0.8944, 0.4472);  float k0 = 0.4488; float a0 = 0.075; float s0 = 1.25;
+        vec2 d1 = vec2(-0.3846, 0.9231); float k1 = 0.6981; float a1 = 0.045; float s1 = 1.55;
+        vec2 d2 = vec2(0.7071, -0.7071); float k2 = 1.1424; float a2 = 0.028; float s2 = 1.85;
+        vec2 d3 = vec2(-0.7809, -0.6247);float k3 = 1.9635; float a3 = 0.015; float s3 = 2.25;
 
         float phi0 = dot(p, d0) * k0 - t * s0;
         float phi1 = dot(p, d1) * k1 - t * s1;
@@ -51,7 +51,7 @@ void main() {
         float c2 = cos(phi2); float s_2 = sin(phi2);
         float c3 = cos(phi3); float s_3 = sin(phi3);
 
-        // Vertical displacement only (preserves triangle mesh integrity without horizontal tearing)
+        // Vertical displacement (peak-to-trough ~0.16m, visible rolling swells)
         float dy = a0 * s_0 + a1 * s_1 + a2 * s_2 + a3 * s_3;
         worldPos.y += dy;
 

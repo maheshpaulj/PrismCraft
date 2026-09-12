@@ -42,37 +42,34 @@ vec3 srgbToLinear(vec3 c) {
 }
 
 // -------------------------------------------------------------
-// Fast 3D Noise for Reflected 3D Cumulus Clouds
 // -------------------------------------------------------------
-float hash3D(vec3 p) {
-    p = fract(p * vec3(443.8975, 397.2973, 491.1871));
-    p += dot(p, p.yzx + 19.19);
-    return fract((p.x + p.y) * p.z);
+// High-Quality Multi-Octave Noise for Reflected Cumulus Clouds
+// -------------------------------------------------------------
+float hash2D(vec2 p) {
+    p = fract(p * vec2(123.34, 456.21));
+    p += dot(p, p + 45.32);
+    return fract(p.x * p.y);
 }
 
-float noise3D(vec3 p) {
-    vec3 i = floor(p);
-    vec3 f = fract(p);
-    vec3 u = f * f * (3.0 - 2.0 * f);
+float valueNoise2D(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
 
-    float n000 = hash3D(i + vec3(0.0, 0.0, 0.0));
-    float n100 = hash3D(i + vec3(1.0, 0.0, 0.0));
-    float n010 = hash3D(i + vec3(0.0, 1.0, 0.0));
-    float n110 = hash3D(i + vec3(1.0, 1.0, 0.0));
-    float n001 = hash3D(i + vec3(0.0, 0.0, 1.0));
-    float n101 = hash3D(i + vec3(1.0, 0.0, 1.0));
-    float n011 = hash3D(i + vec3(0.0, 1.0, 1.0));
-    float n111 = hash3D(i + vec3(1.0, 1.0, 1.0));
+    float a = hash2D(i);
+    float b = hash2D(i + vec2(1.0, 0.0));
+    float c = hash2D(i + vec2(0.0, 1.0));
+    float d = hash2D(i + vec2(1.0, 1.0));
 
-    return mix(mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y),
-               mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y), u.z);
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-float cloudFBM(vec3 p) {
+float cloudFBM2D(vec2 p) {
     float f = 0.0;
-    f += 0.5200 * noise3D(p); p = p * 2.08 + vec3(1.3, 0.7, 2.1);
-    f += 0.2800 * noise3D(p); p = p * 2.12 + vec3(2.1, 1.4, 0.9);
-    f += 0.1400 * noise3D(p);
+    f += 0.500 * valueNoise2D(p); p = p * 2.02 + vec2(1.7, 3.2);
+    f += 0.280 * valueNoise2D(p); p = p * 2.05 + vec2(2.3, 1.4);
+    f += 0.140 * valueNoise2D(p); p = p * 2.08 + vec2(4.1, 2.7);
+    f += 0.080 * valueNoise2D(p);
     return f;
 }
 
@@ -298,33 +295,62 @@ vec4 traceSSR(vec3 rayOrigin, vec3 rayDir) {
 }
 
 // -------------------------------------------------------------
-// Real-Time Screen-Space Reflection (SSR) & Sky Dome
+// Real-Time Screen-Space Reflection (SSR), Sky Dome & Clouds
 // -------------------------------------------------------------
 vec3 getReflectionColor(vec3 origin, vec3 R, vec3 L, float isDay, float sunIntensity, int waterQuality) {
     float goldenHour = smoothstep(0.40, 0.02, pc.dayInfo.y) * step(-0.06, pc.dayInfo.y);
     vec3 sky = computeProceduralSky(R, L, isDay, sunIntensity, goldenHour);
 
-    // 1. Procedural 3D volumetric cumulus clouds (high-contrast, puffy clouds reflecting on water)
-    if (R.y > 0.015 && waterQuality >= 1) {
-        float tCloud = (196.0 - origin.y) / max(R.y, 0.02);
-        if (tCloud > 0.0 && tCloud < 6000.0) {
-            vec3 pCloud = origin + R * tCloud;
-            vec2 wind = vec2(pc.camPos.w * 2.2, pc.camPos.w * 0.9);
-            vec2 ws = pCloud.xz + wind;
-
-            float macroNoise = cloudFBM(vec3(ws * 0.00028, 0.5));
-            if (macroNoise > 0.22) {
-                float cDensity = smoothstep(0.22, 0.48, macroNoise);
-                float cAlpha = clamp(cDensity * 2.0, 0.0, 0.96);
-                float silver = pow(max(dot(R, L) * 0.5 + 0.5, 0.0), 3.0) * 0.70 + 0.85;
-                vec3 goldenCloud = mix(vec3(1.50, 1.45, 1.35), vec3(2.40, 1.65, 0.85), goldenHour);
-                vec3 cloudLit = mix(vec3(0.25, 0.30, 0.42), goldenCloud * silver, isDay);
-                sky = mix(sky, cloudLit, cAlpha);
+    // 1. Screen-Space Sky & 3D Volumetric Cloud Sampling:
+    // If the reflected ray direction R points towards visible sky on screen,
+    // directly sample the rendered sky dome and 3D volumetric clouds from ssrSampler!
+    bool sampledScreenSky = false;
+    vec3 pSky = pc.camPos.xyz + R * 350.0;
+    vec4 cSky = pc.mvp * vec4(pSky, 1.0);
+    if (cSky.w > 0.05) {
+        vec2 uvSky = vec2((cSky.x / cSky.w) * 0.5 + 0.5, 1.0 - ((cSky.y / cSky.w) * 0.5 + 0.5));
+        if (uvSky.x >= 0.012 && uvSky.x <= 0.988 && uvSky.y >= 0.012 && uvSky.y <= 0.988) {
+            float sceneD = texture(depthSampler, uvSky).r;
+            if (sceneD >= 0.9999) {
+                // Ray points to unobstructed sky on screen!
+                vec3 screenSkyColor = texture(ssrSampler, uvSky).rgb;
+                float edgeW = smoothstep(0.012, 0.06, uvSky.x) * smoothstep(0.988, 0.94, uvSky.x) *
+                              smoothstep(0.012, 0.06, uvSky.y) * smoothstep(0.988, 0.94, uvSky.y);
+                sky = mix(sky, screenSkyColor, edgeW);
+                sampledScreenSky = (edgeW > 0.85);
             }
         }
     }
 
-    // 2. Real-time Screen Space Reflections for nearby geometry (river banks, trees, terrain)
+    // 2. High-Contrast Billowy Cumulus Cloud Reflection (for off-screen sky directions or screen edge fill)
+    if (!sampledScreenSky && R.y > 0.012 && waterQuality >= 1) {
+        float tCloud = (196.0 - origin.y) / max(R.y, 0.015);
+        if (tCloud > 0.0 && tCloud < 6500.0) {
+            vec3 pCloud = origin + R * tCloud;
+            vec2 wind = vec2(pc.camPos.w * 4.2, pc.camPos.w * 1.6);
+            vec2 ws = (pCloud.xz + wind) * 0.0032;
+
+            float macroNoise = cloudFBM2D(ws);
+            if (macroNoise > 0.40) {
+                float cDensity = smoothstep(0.40, 0.68, macroNoise);
+                float cAlpha = clamp(cDensity * 1.8, 0.0, 0.96);
+
+                // Silver lining & solar edge illumination
+                float silver = pow(max(dot(R, L) * 0.5 + 0.5, 0.0), 3.2) * 1.10 + 0.90;
+                vec3 midDayCloud = vec3(1.75, 1.72, 1.65);
+                vec3 goldenCloud = vec3(2.65, 1.60, 0.70);
+                vec3 cloudLitColor = mix(midDayCloud, goldenCloud, goldenHour);
+
+                // Ambient underside (soft atmospheric blue, never pitch black)
+                vec3 cloudShadeColor = mix(vec3(0.42, 0.48, 0.65), vec3(0.60, 0.45, 0.42), goldenHour);
+                vec3 finalCloudLit = mix(cloudShadeColor, cloudLitColor * silver, isDay);
+
+                sky = mix(sky, finalCloudLit, cAlpha);
+            }
+        }
+    }
+
+    // 3. Real-time Screen Space Reflections for nearby geometry (river banks, trees, terrain)
     if (waterQuality >= 2) {
         vec4 ssr = traceSSR(origin, R);
         if (ssr.a > 0.001) {
@@ -479,27 +505,33 @@ void main() {
     float baseAlpha = clamp(1.0 - exp(-waterDepthMeters * 0.65), 0.0, 0.95);
 
     // -------------------------------------------------------------
-    // 3. Layered Micro Detail Ripples (Fine Water Glint Texture)
+    // 3. Dynamic Wave Ripples & Surface Motion
     // -------------------------------------------------------------
-    float t = pc.camPos.w * 0.40;
+    float t = pc.camPos.w * 1.05;
     vec2 pos = fragWorldPos.xz;
     float distToCam = length(fragWorldPos - pc.camPos.xyz);
 
-    // Micro layer 1: fine ripples scrolling along (0.8, 0.6)
-    vec2 uv1 = pos * 1.2 + vec2(t * 0.20, t * 0.15);
-    float r1_x = cos(uv1.x * 3.14 + sin(uv1.y * 2.1)) * 3.14;
-    float r1_y = cos(uv1.y * 3.14 + cos(uv1.x * 2.1)) * 3.14;
-    vec2 microGrad1 = vec2(r1_x, r1_y) * 0.006;
+    // Medium swells: wave ripples scrolling along (0.85, 0.52)
+    vec2 uv1 = pos * 0.65 + vec2(t * 0.32, t * 0.20);
+    float r1_x = cos(uv1.x * 3.14 + sin(uv1.y * 2.2)) * 3.14;
+    float r1_y = cos(uv1.y * 3.14 + cos(uv1.x * 2.2)) * 3.14;
+    vec2 rippleGrad1 = vec2(r1_x, r1_y) * 0.026;
 
-    // Micro layer 2: cross-ripples rotated ~45 deg, scrolling along (-0.6, 0.8)
-    vec2 uv2 = vec2(pos.x * 0.707 - pos.y * 0.707, pos.x * 0.707 + pos.y * 0.707) * 2.2 - vec2(t * 0.15, -t * 0.22);
-    float r2_x = sin(uv2.x * 3.14) * 3.14;
-    float r2_y = cos(uv2.y * 3.14) * 3.14;
-    vec2 microGrad2 = vec2(r2_x, r2_y) * 0.004;
+    // Cross-ripples rotated ~45 deg, scrolling along (-0.6, 0.8)
+    vec2 uv2 = vec2(pos.x * 0.707 - pos.y * 0.707, pos.x * 0.707 + pos.y * 0.707) * 1.35 - vec2(t * 0.25, -t * 0.32);
+    float r2_x = sin(uv2.x * 3.14 + cos(uv2.y * 2.0)) * 3.14;
+    float r2_y = cos(uv2.y * 3.14 + sin(uv2.x * 2.0)) * 3.14;
+    vec2 rippleGrad2 = vec2(r2_x, r2_y) * 0.018;
 
-    // Distance fade for micro ripples to prevent distant aliasing/shimmering
-    float microFade = 1.0 - smoothstep(30.0, 160.0, distToCam);
-    vec2 totalMicro = (microGrad1 + microGrad2) * microFade;
+    // Fine capillary ripples for glistening sun sparkles
+    vec2 uv3 = pos * 2.8 + vec2(-t * 0.40, t * 0.35);
+    float r3_x = sin(uv3.x * 3.14) * 3.14;
+    float r3_y = cos(uv3.y * 3.14) * 3.14;
+    vec2 fineGrad = vec2(r3_x, r3_y) * 0.012;
+
+    // Distance fade to prevent shimmering at far horizon
+    float rippleFade = 1.0 - smoothstep(40.0, 180.0, distToCam);
+    vec2 totalRipples = (rippleGrad1 + rippleGrad2 + fineGrad) * rippleFade;
 
     // -------------------------------------------------------------
     // 4. Directional Flow Currents for Streams & Waterfalls
@@ -511,31 +543,32 @@ void main() {
 
     if (isFlowing) {
         vec2 fDir = normalize(flowDir);
-        float fPhase0 = fract(t * 1.3);
-        float fPhase1 = fract(t * 1.3 + 0.5);
+        float fPhase0 = fract(t * 1.5);
+        float fPhase1 = fract(t * 1.5 + 0.5);
         float fW0 = 1.0 - abs(fPhase0 - 0.5) * 2.0;
         float fW1 = 1.0 - abs(fPhase1 - 0.5) * 2.0;
-        float r0 = sin(dot(pos - fDir * fPhase0 * 1.6, fDir) * 4.5) * 0.025;
-        float r1 = sin(dot(pos - fDir * fPhase1 * 1.6, fDir) * 4.5) * 0.025;
-        totalMicro += fDir * (r0 * fW0 + r1 * fW1);
+        float r0 = sin(dot(pos - fDir * fPhase0 * 2.0, fDir) * 4.5) * 0.035;
+        float r1 = sin(dot(pos - fDir * fPhase1 * 2.0, fDir) * 4.5) * 0.035;
+        totalRipples += fDir * (r0 * fW0 + r1 * fW1);
     }
 
     vec3 rawNormal = normalize(fragNormal);
 
     // -------------------------------------------------------------
     // 5. DUAL-NORMAL PIPELINE:
-    // a) smoothNormal: Macro Gerstner normal gently low-passed towards (0, 1, 0).
-    //    ZERO micro-ripples! Fed to SSR reflect(-V, smoothNormal), ray march, and Fresnel.
-    //    This preserves mirror-coherent reflections of trees, mountains, and clouds!
-    // b) detailNormal: Macro Gerstner normal + micro ripples.
-    //    Used EXCLUSIVELY for GGX specular sun glints.
+    // a) smoothNormal: Carries rolling Gerstner swells + gentle wave tilt.
+    //    Gives visible, organic undulation to reflections so reflected trees,
+    //    mountains, and clouds ripple across the lake without breaking into noise!
+    // b) detailNormal: Adds fine capillary ripples.
+    //    Used for GGX specular glints and sun path sparkles.
     // -------------------------------------------------------------
     vec3 smoothNormal;
     vec3 detailNormal;
 
     if (isTopFace) {
-        smoothNormal = normalize(mix(vec3(0.0, 1.0, 0.0), rawNormal, 0.20));
-        detailNormal = normalize(vec3(rawNormal.x - totalMicro.x, rawNormal.y, rawNormal.z - totalMicro.y));
+        vec2 swellTilt = (rippleGrad1 + rippleGrad2 * 0.5) * rippleFade;
+        smoothNormal = normalize(mix(vec3(0.0, 1.0, 0.0), rawNormal, 0.65) - vec3(swellTilt.x, 0.0, swellTilt.y) * 0.45);
+        detailNormal = normalize(vec3(rawNormal.x - totalRipples.x, rawNormal.y, rawNormal.z - totalRipples.y));
     } else {
         float downRipple = sin((fragWorldPos.y + t * 2.5) * 6.0) * 0.05;
         smoothNormal = rawNormal;
@@ -612,11 +645,11 @@ void main() {
                 float tCloud = (196.0 - fragWorldPos.y) / max(R_refractG.y, 0.02);
                 if (tCloud > 0.0 && tCloud < 5000.0) {
                     vec3 pCloud = fragWorldPos + R_refractG * tCloud;
-                    vec2 ws = pCloud.xz + vec2(pc.camPos.w * 2.2, pc.camPos.w * 0.9);
-                    float macroNoise = cloudFBM(vec3(ws * 0.00028, 0.5));
-                    if (macroNoise > 0.22) {
-                        float cDensity = smoothstep(0.22, 0.48, macroNoise);
-                        float cAlpha = clamp(cDensity * 2.0, 0.0, 0.96);
+                    vec2 ws = (pCloud.xz + vec2(pc.camPos.w * 4.2, pc.camPos.w * 1.6)) * 0.0032;
+                    float macroNoise = cloudFBM2D(ws);
+                    if (macroNoise > 0.40) {
+                        float cDensity = smoothstep(0.40, 0.68, macroNoise);
+                        float cAlpha = clamp(cDensity * 1.8, 0.0, 0.96);
                         float silver = pow(max(dot(R_refractG, L) * 0.5 + 0.5, 0.0), 3.0) * 0.70 + 0.85;
                         vec3 goldenCloud = mix(vec3(1.50, 1.45, 1.35), vec3(2.40, 1.65, 0.85), goldenHour);
                         vec3 cloudLit = mix(vec3(0.25, 0.30, 0.42), goldenCloud * silver, isDay);
