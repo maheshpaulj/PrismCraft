@@ -184,10 +184,10 @@ float linearizeDepth(float z_ndc) {
 // Reprojects each march step through MVP into screen UV + linear depth
 // -------------------------------------------------------------
 vec4 traceSSR(vec3 rayOrigin, vec3 rayDir) {
-    const float maxDist = 85.0;
-    const int maxSteps = 40;
-    float t = 0.25;
-    float dt = 0.35;
+    const float maxDist = 160.0;
+    const int maxSteps = 48;
+    float t = 0.6;
+    float dt = 0.75;
     float tPrev = t;
 
     vec2 hitUV = vec2(0.0);
@@ -221,14 +221,26 @@ vec4 traceSSR(vec3 rayOrigin, vec3 rayDir) {
         if (sceneRawDepth >= 0.9999) {
             tPrev = t;
             t += dt;
-            dt *= 1.06;
+            dt *= 1.05;
             continue;
         }
 
         float sceneLinearDepth = linearizeDepth(sceneRawDepth);
 
+        // RECONSTRUCT SCENE WORLD Y:
+        // In the opaque depth pass, any pixel showing water has the LAKEBED depth.
+        // A reflection ray in the air above water CANNOT hit underwater lakebed!
+        // We reject any candidate whose reconstructed world Y is at or below the water surface.
+        float sceneY = pc.camPos.y + (p.y - pc.camPos.y) * (sceneLinearDepth / rayLinearDepth);
+        if (sceneY <= rayOrigin.y + 0.15) {
+            tPrev = t;
+            t += dt;
+            dt *= 1.05;
+            continue;
+        }
+
         // Thickness tolerance in meters: expands with distance to avoid false pass-throughs
-        float thickness = 0.60 + 0.04 * t;
+        float thickness = 0.90 + 0.05 * t;
         float depthDiff = rayLinearDepth - sceneLinearDepth;
 
         // Hit check: ray has entered the surface within the thickness envelope
@@ -243,7 +255,8 @@ vec4 traceSSR(vec3 rayOrigin, vec3 rayDir) {
                 if (cMid.w > 0.05) {
                     vec2 uvMid = (cMid.xy / cMid.w) * 0.5 + 0.5;
                     float sDepth = linearizeDepth(texture(depthSampler, uvMid).r);
-                    if (cMid.w >= sDepth) {
+                    float sY = pc.camPos.y + (pMid.y - pc.camPos.y) * (sDepth / cMid.w);
+                    if (sY > rayOrigin.y + 0.15 && cMid.w >= sDepth) {
                         t1 = tMid;
                         hitUV = uvMid;
                     } else {
@@ -257,21 +270,21 @@ vec4 traceSSR(vec3 rayOrigin, vec3 rayDir) {
 
         tPrev = t;
         t += dt;
-        dt *= 1.06;
+        dt *= 1.05;
     }
 
     if (!hitFound) {
         return vec4(0.0);
     }
 
-    // Screen edge vignetting: tight 1.5% falloff so reflections reach right to the borders
-    float edgeFade = smoothstep(0.0, 0.015, hitUV.x) *
-                     smoothstep(0.0, 0.015, 1.0 - hitUV.x) *
-                     smoothstep(0.0, 0.015, hitUV.y) *
-                     smoothstep(0.0, 0.015, 1.0 - hitUV.y);
+    // Screen edge vignetting: smooth 3.5% falloff so reflections reach borders gracefully
+    float edgeFade = smoothstep(0.0, 0.035, hitUV.x) *
+                     smoothstep(0.0, 0.035, 1.0 - hitUV.x) *
+                     smoothstep(0.0, 0.035, hitUV.y) *
+                     smoothstep(0.0, 0.035, 1.0 - hitUV.y);
 
     // Distance fade as ray approaches maximum reach
-    float distFade = 1.0 - smoothstep(maxDist * 0.65, maxDist, t);
+    float distFade = 1.0 - smoothstep(maxDist * 0.70, maxDist, t);
     float totalFade = edgeFade * distFade;
 
     // Multi-tap soft reflection sample (liquid dispersion)
@@ -521,7 +534,7 @@ void main() {
     vec3 detailNormal;
 
     if (isTopFace) {
-        smoothNormal = normalize(mix(vec3(0.0, 1.0, 0.0), rawNormal, 0.35));
+        smoothNormal = normalize(mix(vec3(0.0, 1.0, 0.0), rawNormal, 0.20));
         detailNormal = normalize(vec3(rawNormal.x - totalMicro.x, rawNormal.y, rawNormal.z - totalMicro.y));
     } else {
         float downRipple = sin((fragWorldPos.y + t * 2.5) * 6.0) * 0.05;
@@ -542,42 +555,90 @@ void main() {
 
     if (viewingFromBelow || cameraUnderwater) {
         // -------------------------------------------------------------
-        // UNDERWATER VIEW: Snell's Window & Total Internal Reflection (TIR)
+        // UNDERWATER VIEW: Organic Snell's Window & Total Internal Reflection (TIR)
         // -------------------------------------------------------------
-        // Water index of refraction n1 = 1.333, Air n2 = 1.0
-        // Surface normal pointing into water towards camera:
-        vec3 N_intoWater = -smoothNormal;
-        float cosIncidence = clamp(dot(-V, N_intoWater), 0.0, 1.0);
+        vec3 N_down = -smoothNormal;
+        float cosIncidence = clamp(dot(-V, N_down), 0.0, 1.0);
 
-        // Critical angle test: sin2_t = eta^2 * (1 - cosIncidence^2)
+        // Snell's Law Critical Angle:
+        // eta = 1.333 (water to air)
         const float eta = 1.333;
         float sin2_t = (eta * eta) * (1.0 - cosIncidence * cosIncidence);
         bool isTIR = (sin2_t >= 1.0);
 
-        vec3 underWaterTint = mix(vec3(0.012, 0.065, 0.11), vec3(0.005, 0.035, 0.075), clamp(waterDepthMeters / 6.0, 0.0, 1.0));
+        // Organic fluid caustic light webs (no rigid checkerboard!)
+        vec2 cp1 = pos * 0.70 + vec2(t * 0.22, t * 0.15);
+        vec2 cp2 = pos * 0.95 - vec2(t * 0.18, -t * 0.25);
+        float cw1 = sin(cp1.x * 2.2 + sin(cp1.y * 1.8 + t * 0.8));
+        float cw2 = cos(cp1.y * 2.4 + cos(cp1.x * 1.9 - t * 0.7));
+        float cw3 = sin(cp2.x * 3.1 + cos(cp2.y * 2.5 + t * 0.9));
+        float cw4 = cos(cp2.y * 2.8 + sin(cp2.x * 2.7 - t * 0.6));
+        float caustic1 = 1.0 - abs(cw1 + cw2) * 0.5;
+        float caustic2 = 1.0 - abs(cw3 + cw4) * 0.5;
+        float fluidCaustic = pow(clamp(caustic1 * caustic2, 0.0, 1.0), 2.2);
+
+        vec3 deepUnderwaterFog = vec3(0.008, 0.045, 0.080);
+        vec3 shallowUnderwaterFog = vec3(0.015, 0.075, 0.120);
+        vec3 underWaterTint = mix(shallowUnderwaterFog, deepUnderwaterFog, clamp(waterDepthMeters / 6.0, 0.0, 1.0));
         float goldenHour = smoothstep(0.40, 0.02, pc.dayInfo.y) * step(-0.06, pc.dayInfo.y);
 
         if (isTIR) {
-            // Total Internal Reflection: surface mirrors the underwater floor with deep blue-green attenuation
-            waterSurfaceColor = mix(underWaterTint * 0.75, vec3(0.006, 0.038, 0.075), 0.5);
+            // Outside Snell's window: Total Internal Reflection (TIR)
+            // Mirrors the underwater floor and depth in shimmering dark teal
+            vec3 R_tir = reflect(-V, N_down);
+            vec3 mirroredCeiling = mix(deepUnderwaterFog * 0.85, vec3(0.004, 0.025, 0.055), clamp(-R_tir.y, 0.0, 1.0));
+            mirroredCeiling += vec3(0.02, 0.06, 0.08) * fluidCaustic * isDay;
+            waterSurfaceColor = mirroredCeiling;
             finalAlpha = 0.88;
         } else {
-            // Inside Snell's Window: refract upward into the above-water sky/clouds
-            vec3 R_refract = refract(-V, N_intoWater, eta);
+            // Inside Snell's Window: Refraction into the outside sky, sun, and clouds
+            vec3 N_refractNormal = normalize(mix(vec3(0.0, -1.0, 0.0), N_down, 0.40));
+            vec3 R_refract = refract(-V, N_refractNormal, eta);
+            if (length(R_refract) < 0.01) {
+                R_refract = vec3(0.0, 1.0, 0.0);
+            }
+
             vec3 skyRefract = computeProceduralSky(R_refract, L, isDay, sunIntensity, goldenHour);
 
-            // Refraction distortion and surface caustics
-            float caustic = sin(pos.x * 2.5 + t * 1.5) * cos(pos.y * 2.5 + t * 1.2) * 0.5 + 0.5;
-            skyRefract += vec3(0.12, 0.18, 0.14) * (caustic * 0.18 * isDay);
+            // Refract 3D volumetric clouds through Snell's window
+            if (R_refract.y > 0.02) {
+                float tCloud = (196.0 - fragWorldPos.y) / max(R_refract.y, 0.02);
+                if (tCloud > 0.0 && tCloud < 5000.0) {
+                    vec3 pCloud = fragWorldPos + R_refract * tCloud;
+                    vec2 ws = pCloud.xz + vec2(pc.camPos.w * 2.2, pc.camPos.w * 0.9);
+                    float macroNoise = cloudFBM(vec3(ws * 0.00028, 0.5));
+                    if (macroNoise > 0.22) {
+                        float cDensity = smoothstep(0.22, 0.48, macroNoise);
+                        float cAlpha = clamp(cDensity * 2.0, 0.0, 0.96);
+                        float silver = pow(max(dot(R_refract, L) * 0.5 + 0.5, 0.0), 3.0) * 0.70 + 0.85;
+                        vec3 goldenCloud = mix(vec3(1.50, 1.45, 1.35), vec3(2.40, 1.65, 0.85), goldenHour);
+                        vec3 cloudLit = mix(vec3(0.25, 0.30, 0.42), goldenCloud * silver, isDay);
+                        skyRefract = mix(skyRefract, cloudLit, cAlpha);
+                    }
+                }
+            }
 
-            waterSurfaceColor = mix(skyRefract, underWaterTint, 0.28);
-            finalAlpha = 0.60;
+            // Direct sun disc through Snell's window
+            float cosSun = dot(R_refract, L);
+            if (cosSun > 0.995 && isDay > 0.05) {
+                skyRefract += vec3(3.5, 3.0, 2.0) * isDay * sunIntensity;
+            }
+
+            // Luminous caustic fringe at the rim of Snell's window
+            float windowBorder = smoothstep(0.85, 0.98, sin2_t);
+            skyRefract = mix(skyRefract, underWaterTint * 1.5, windowBorder * 0.6);
+
+            // Fluid caustic wash on surface
+            skyRefract += vec3(0.04, 0.12, 0.16) * fluidCaustic * isDay;
+
+            waterSurfaceColor = mix(skyRefract, underWaterTint, 0.20);
+            finalAlpha = mix(0.35, 0.80, windowBorder);
         }
 
-        // Upward caustic sunlight beams shining down through water
-        float underCaustic = pow(sin(pos.x * 2.5 + t * 1.5) * sin(pos.y * 2.5 + t * 1.2) * 0.5 + 0.5, 2.0) * 0.28 * sunIntensity;
-        vec3 sunBeams = mix(vec3(0.15, 0.35, 0.55), vec3(0.95, 0.88, 0.65), isDay) * underCaustic;
-        waterSurfaceColor += sunBeams;
+        // Downward caustic light beams in water
+        float sunBeams = fluidCaustic * 0.45 * sunIntensity * isDay;
+        vec3 beamColor = mix(vec3(0.12, 0.35, 0.50), vec3(0.85, 0.80, 0.55), goldenHour);
+        waterSurfaceColor += beamColor * sunBeams;
 
     } else {
         // -------------------------------------------------------------
@@ -659,7 +720,7 @@ void main() {
     if (cameraUnderwater) {
         float dist = length(fragWorldPos - pc.camPos.xyz);
         float uFactor = smoothstep(2.0, 24.0, dist);
-        waterSurfaceColor = mix(waterSurfaceColor, vec3(0.005, 0.035, 0.12), uFactor);
+        waterSurfaceColor = mix(waterSurfaceColor, vec3(0.008, 0.045, 0.080), uFactor);
     } else {
         waterSurfaceColor = applyHorizonDistanceFog(
             waterSurfaceColor,
