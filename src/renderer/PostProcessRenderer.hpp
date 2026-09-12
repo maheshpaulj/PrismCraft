@@ -27,6 +27,7 @@ public:
 
     void transitionHDRForRendering(VkCommandBuffer cmd);
     void transitionHDRForSampling(VkCommandBuffer cmd);
+    void transitionDepthForRendering(VkCommandBuffer cmd);
 
     void render(VkCommandBuffer cmd, VkImageView swapchainImageView, VkExtent2D extent,
                 float exposure, float vibrance, float bloomStrength, float time,
@@ -40,11 +41,14 @@ public:
 
     [[nodiscard]] VkImageView getHDRImageView() const { return m_hdrImageView; }
     [[nodiscard]] VkImage getHDRImage() const { return m_hdrImage; }
+    [[nodiscard]] VkImageView getSceneDepthImageView() const { return m_sceneDepthImageView; }
+    [[nodiscard]] VkImage getSceneDepthImage() const { return m_sceneDepthImage; }
     [[nodiscard]] VkImageView getSSRImageView() const { return m_ssrImageView; }
     [[nodiscard]] VkSampler getSSRSampler() const { return m_ssrSampler; }
     [[nodiscard]] VkImageView getSSRDepthImageView() const { return m_ssrDepthImageView; }
     [[nodiscard]] VkSampler getSSRDepthSampler() const { return m_ssrDepthSampler; }
     [[nodiscard]] VkFormat getHDRFormat() const { return m_hdrFormat; }
+    [[nodiscard]] VkFormat getDepthFormat() const { return m_depthFormat; }
     [[nodiscard]] uint32_t getWidth() const { return m_width; }
     [[nodiscard]] uint32_t getHeight() const { return m_height; }
 
@@ -59,11 +63,16 @@ private:
     uint32_t m_height = 0;
     VkFormat m_swapchainFormat;
     VkFormat m_hdrFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
+    VkFormat m_depthFormat = VK_FORMAT_D32_SFLOAT;
 
     VkImage m_hdrImage = VK_NULL_HANDLE;
     VmaAllocation m_hdrAllocation = VK_NULL_HANDLE;
     VkImageView m_hdrImageView = VK_NULL_HANDLE;
     VkSampler m_hdrSampler = VK_NULL_HANDLE;
+
+    VkImage m_sceneDepthImage = VK_NULL_HANDLE;
+    VmaAllocation m_sceneDepthAllocation = VK_NULL_HANDLE;
+    VkImageView m_sceneDepthImageView = VK_NULL_HANDLE;
 
     VkImage m_ssrImage = VK_NULL_HANDLE;
     VmaAllocation m_ssrAllocation = VK_NULL_HANDLE;
@@ -76,6 +85,7 @@ private:
     VkSampler m_ssrDepthSampler = VK_NULL_HANDLE;
 
     VkImageLayout m_currentHDRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageLayout m_currentDepthLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkImageLayout m_currentSSRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkImageLayout m_currentSSRDepthLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 

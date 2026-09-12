@@ -424,7 +424,7 @@ int MenuRenderer::handleClick(GameState& state, Player& player, glm::vec2 mouseP
         }
         if (inBox(rx, y0 + dy * 6.0f, bW, bH) && !isDown) {
             AudioEngine::get().playSound(SoundEffect::Click);
-            options.resIndex = (options.resIndex + 1) % 4;
+            options.resIndex = (options.resIndex + 1) % 5;
             return 14;
         }
 
@@ -1223,8 +1223,8 @@ void MenuRenderer::rebuildMenuMesh(GameState state, const Player& player, uint32
         std::snprintf(uiBuf, sizeof(uiBuf), "UI SCALE: %.1fx", options.uiScale);
         addRectButton(lx, y0 + dy * 6.0f, bW, bH, uiBuf, inBox(lx, y0 + dy * 6.0f, bW, bH), true);
 
-        const char* resNames[] = {"RES: 1280x720", "RES: 1600x900", "RES: 1920x1080", "RES: 2560x1440"};
-        addRectButton(rx, y0 + dy * 6.0f, bW, bH, resNames[std::clamp(options.resIndex, 0, 3)], inBox(rx, y0 + dy * 6.0f, bW, bH), true);
+        const char* resNames[] = {"RENDER: 1280x720", "RENDER: 1600x900", "RENDER: 1920x1080", "RENDER: 2560x1440", "RENDER: NATIVE"};
+        addRectButton(rx, y0 + dy * 6.0f, bW, bH, resNames[std::clamp(options.resIndex, 0, 4)], inBox(rx, y0 + dy * 6.0f, bW, bH), true);
 
         // Row 7: DONE / BACK (center)
         float doneW = 320.0f;

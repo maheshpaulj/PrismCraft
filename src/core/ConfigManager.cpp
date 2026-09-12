@@ -42,7 +42,7 @@ bool ConfigManager::load(GameOptions& options, const std::string& filePath) {
             else if (key == "ambientVolume") options.ambientVolume = std::clamp(std::stof(val), 0.0f, 1.0f);
             else if (key == "uiScale") options.uiScale = std::clamp(std::stof(val), 1.0f, 3.0f);
             else if (key == "windowMode") options.windowMode = std::clamp(std::stoi(val), 0, 2);
-            else if (key == "resIndex") options.resIndex = std::clamp(std::stoi(val), 0, 3);
+            else if (key == "resIndex") options.resIndex = std::clamp(std::stoi(val), 0, 4);
             else if (key == "maxFps") options.maxFps = std::stoi(val);
             else if (key == "vsync") options.vsync = (val == "1" || val == "true" || val == "True");
             else if (key == "renderDistance") options.renderDistance = std::clamp(std::stoi(val), 4, 24);

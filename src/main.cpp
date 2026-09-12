@@ -209,8 +209,17 @@ void run() {
     options.renderDistance = std::clamp(options.renderDistance, 4, 24);
 
     static const int resList[4][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
-    int initialW = resList[std::clamp(options.resIndex, 0, 3)][0];
-    int initialH = resList[std::clamp(options.resIndex, 0, 3)][1];
+    int initialW = (options.resIndex < 4) ? resList[options.resIndex][0] : 1920;
+    int initialH = (options.resIndex < 4) ? resList[options.resIndex][1] : 1080;
+
+    auto computeRenderResolution = [](int resIdx, int winW, int winH) -> std::pair<uint32_t, uint32_t> {
+        static const int resTable[4][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
+        if (resIdx >= 0 && resIdx < 4) {
+            return { static_cast<uint32_t>(resTable[resIdx][0]), static_cast<uint32_t>(resTable[resIdx][1]) };
+        }
+        // Index 4 (Native): render at 100% of physical display / window resolution
+        return { static_cast<uint32_t>(std::max(winW, 1)), static_cast<uint32_t>(std::max(winH, 1)) };
+    };
 
     Window window("PrismCraft", initialW, initialH);
     window.setWindowMode(options.windowMode, initialW, initialH, window.getRefreshRate());
@@ -224,7 +233,9 @@ void run() {
     VulkanContext context(window.getHandle());
     Swapchain swapchain(context, window.getWidth(), window.getHeight(), options.vsync);
     CommandQueue commandQueue(context);
-    PostProcessRenderer postProcessRenderer(context, window.getWidth(), window.getHeight(), swapchain.getImageFormat(), exeDir);
+
+    auto [initialRenderW, initialRenderH] = computeRenderResolution(options.resIndex, window.getWidth(), window.getHeight());
+    PostProcessRenderer postProcessRenderer(context, initialRenderW, initialRenderH, swapchain.getImageFormat(), exeDir);
     
     // Generate & Upload 256x512 Pixel-Art Texture Atlas with Crisp Nearest Filtering (zero blur, zero atlas bleed)
     std::vector<uint8_t> atlasPixels = TextureAtlas::generateAtlasPixels();
@@ -596,19 +607,25 @@ void run() {
             }
         }
         
-        uint32_t screenW = static_cast<uint32_t>(window.getWidth());
-        uint32_t screenH = static_cast<uint32_t>(window.getHeight());
-        
-        if (screenW == 0 || screenH == 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        // Handle iconified / minimized state: pause render loop without calling Vulkan APIs
+        int fbW = 0, fbH = 0;
+        glfwGetFramebufferSize(window.getHandle(), &fbW, &fbH);
+        if (window.isIconified() || fbW <= 0 || fbH <= 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
             continue;
         }
 
-        if (window.wasResized()) {
+        uint32_t screenW = static_cast<uint32_t>(fbW);
+        uint32_t screenH = static_cast<uint32_t>(fbH);
+
+        if (window.wasResized() || screenW != swapchain.getExtent().width || screenH != swapchain.getExtent().height) {
             window.resetResizedFlag();
             swapchain.recreate(screenW, screenH);
-            postProcessRenderer.recreate(screenW, screenH);
-            updateWaterDescriptorSets();
+            auto [targetRenderW, targetRenderH] = computeRenderResolution(options.resIndex, screenW, screenH);
+            if (targetRenderW != postProcessRenderer.getWidth() || targetRenderH != postProcessRenderer.getHeight()) {
+                postProcessRenderer.recreate(targetRenderW, targetRenderH);
+                updateWaterDescriptorSets();
+            }
         }
         
         glm::vec2 mousePos = Input::getMousePosition();
@@ -1035,16 +1052,26 @@ void run() {
                     world->lodPreset = options.lodPreset;
                     if (swapchain.isVSyncEnabled() != options.vsync) {
                         swapchain.setVSync(options.vsync, window.getWidth(), window.getHeight());
-                        postProcessRenderer.recreate(window.getWidth(), window.getHeight());
-                        updateWaterDescriptorSets();
                     }
                     if (action == 13 || action == 14) {
-                        int targetW = resList[std::clamp(options.resIndex, 0, 3)][0];
-                        int targetH = resList[std::clamp(options.resIndex, 0, 3)][1];
-                        window.setWindowMode(options.windowMode, targetW, targetH, window.getRefreshRate());
-                        swapchain.recreate(window.getWidth(), window.getHeight());
-                        postProcessRenderer.recreate(window.getWidth(), window.getHeight());
-                        updateWaterDescriptorSets();
+                        if (action == 13) {
+                            int targetW = (options.resIndex < 4) ? resList[options.resIndex][0] : window.getWidth();
+                            int targetH = (options.resIndex < 4) ? resList[options.resIndex][1] : window.getHeight();
+                            window.setWindowMode(options.windowMode, targetW, targetH, window.getRefreshRate());
+                            swapchain.recreate(window.getWidth(), window.getHeight());
+                        } else if (action == 14) {
+                            if (options.windowMode == 0) {
+                                int targetW = (options.resIndex < 4) ? resList[options.resIndex][0] : window.getWidth();
+                                int targetH = (options.resIndex < 4) ? resList[options.resIndex][1] : window.getHeight();
+                                window.setWindowMode(0, targetW, targetH, window.getRefreshRate());
+                                swapchain.recreate(window.getWidth(), window.getHeight());
+                            }
+                        }
+                        auto [targetRenderW, targetRenderH] = computeRenderResolution(options.resIndex, window.getWidth(), window.getHeight());
+                        if (targetRenderW != postProcessRenderer.getWidth() || targetRenderH != postProcessRenderer.getHeight()) {
+                            postProcessRenderer.recreate(targetRenderW, targetRenderH);
+                            updateWaterDescriptorSets();
+                        }
                     }
                     ConfigManager::save(options, exeDir + "options.txt");
                 } else if (action == 4) {
@@ -1063,17 +1090,27 @@ void run() {
                 int action = menuRenderer.handleClick(state, player, uiMousePos, uiW, uiH, currentSeed, options, !isPressed);
                 if (action != 0) {
                     if (action == 13 || action == 14) {
-                        int targetW = resList[std::clamp(options.resIndex, 0, 3)][0];
-                        int targetH = resList[std::clamp(options.resIndex, 0, 3)][1];
-                        window.setWindowMode(options.windowMode, targetW, targetH, window.getRefreshRate());
-                        swapchain.recreate(window.getWidth(), window.getHeight());
-                        postProcessRenderer.recreate(window.getWidth(), window.getHeight());
-                        updateWaterDescriptorSets();
+                        if (action == 13) {
+                            int targetW = (options.resIndex < 4) ? resList[options.resIndex][0] : window.getWidth();
+                            int targetH = (options.resIndex < 4) ? resList[options.resIndex][1] : window.getHeight();
+                            window.setWindowMode(options.windowMode, targetW, targetH, window.getRefreshRate());
+                            swapchain.recreate(window.getWidth(), window.getHeight());
+                        } else if (action == 14) {
+                            if (options.windowMode == 0) {
+                                int targetW = (options.resIndex < 4) ? resList[options.resIndex][0] : window.getWidth();
+                                int targetH = (options.resIndex < 4) ? resList[options.resIndex][1] : window.getHeight();
+                                window.setWindowMode(0, targetW, targetH, window.getRefreshRate());
+                                swapchain.recreate(window.getWidth(), window.getHeight());
+                            }
+                        }
+                        auto [targetRenderW, targetRenderH] = computeRenderResolution(options.resIndex, window.getWidth(), window.getHeight());
+                        if (targetRenderW != postProcessRenderer.getWidth() || targetRenderH != postProcessRenderer.getHeight()) {
+                            postProcessRenderer.recreate(targetRenderW, targetRenderH);
+                            updateWaterDescriptorSets();
+                        }
                     }
                     if (swapchain.isVSyncEnabled() != options.vsync) {
                         swapchain.setVSync(options.vsync, window.getWidth(), window.getHeight());
-                        postProcessRenderer.recreate(window.getWidth(), window.getHeight());
-                        updateWaterDescriptorSets();
                     }
                     if (options.cloudSeed != currentCloudSeed) {
                         context.waitIdle();
@@ -1163,8 +1200,11 @@ void run() {
         uint32_t imageIndex = commandQueue.beginFrame(swapchain);
         if (imageIndex == UINT32_MAX) {
             swapchain.recreate(window.getWidth(), window.getHeight());
-            postProcessRenderer.recreate(window.getWidth(), window.getHeight());
-            updateWaterDescriptorSets();
+            auto [targetRenderW, targetRenderH] = computeRenderResolution(options.resIndex, window.getWidth(), window.getHeight());
+            if (targetRenderW != postProcessRenderer.getWidth() || targetRenderH != postProcessRenderer.getHeight()) {
+                postProcessRenderer.recreate(targetRenderW, targetRenderH);
+                updateWaterDescriptorSets();
+            }
             continue;
         }
 
@@ -1428,12 +1468,14 @@ void run() {
         // Pass 1: 3D Scene HDR Dynamic Rendering Pass
         // =============================================================
         postProcessRenderer.transitionHDRForRendering(cmd);
-        swapchain.transitionDepthAttachment(cmd);
+        postProcessRenderer.transitionDepthForRendering(cmd);
 
         auto srgbToLinear = [](float c) {
             return (c <= 0.04045f) ? (c / 12.92f) : std::pow((c + 0.055f) / 1.055f, 2.4f);
         };
         glm::vec3 linearSky(srgbToLinear(skyColor.r), srgbToLinear(skyColor.g), srgbToLinear(skyColor.b));
+
+        VkExtent2D renderExtent = { postProcessRenderer.getWidth(), postProcessRenderer.getHeight() };
 
         VkRenderingAttachmentInfo hdrColorAtt{};
         hdrColorAtt.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -1445,7 +1487,7 @@ void run() {
 
         VkRenderingAttachmentInfo depthAtt{};
         depthAtt.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        depthAtt.imageView = swapchain.getDepthImageView();
+        depthAtt.imageView = postProcessRenderer.getSceneDepthImageView();
         depthAtt.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
         depthAtt.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         depthAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1453,7 +1495,7 @@ void run() {
 
         VkRenderingInfo hdrRenderInfo{};
         hdrRenderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-        hdrRenderInfo.renderArea = {{ 0, 0 }, swapchain.getExtent()};
+        hdrRenderInfo.renderArea = {{ 0, 0 }, renderExtent};
         hdrRenderInfo.layerCount = 1;
         hdrRenderInfo.colorAttachmentCount = 1;
         hdrRenderInfo.pColorAttachments = &hdrColorAtt;
@@ -1463,14 +1505,14 @@ void run() {
 
         VkViewport viewport{};
         viewport.x = 0.0f;
-        viewport.y = static_cast<float>(swapchain.getExtent().height);
-        viewport.width = static_cast<float>(swapchain.getExtent().width);
-        viewport.height = -static_cast<float>(swapchain.getExtent().height);
+        viewport.y = static_cast<float>(renderExtent.height);
+        viewport.width = static_cast<float>(renderExtent.width);
+        viewport.height = -static_cast<float>(renderExtent.height);
         viewport.minDepth = 0.0f;
         viewport.maxDepth = 1.0f;
         vkCmdSetViewport(cmd, 0, 1, &viewport);
 
-        VkRect2D scissor{{ 0, 0 }, swapchain.getExtent()};
+        VkRect2D scissor{{ 0, 0 }, renderExtent};
         vkCmdSetScissor(cmd, 0, 1, &scissor);
 
         if (render3D) {
@@ -1549,7 +1591,7 @@ void run() {
             // 4. Water Dynamic Render Pass (with SSR snapshot)
             vkCmdEndRendering(cmd);
 
-            postProcessRenderer.copyHDRToSSR(cmd, swapchain.getDepthImage());
+            postProcessRenderer.copyHDRToSSR(cmd);
 
             VkRenderingAttachmentInfo waterColorAtt = hdrColorAtt;
             waterColorAtt.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
@@ -1659,8 +1701,11 @@ void run() {
 
         if (!commandQueue.endFrame(swapchain, imageIndex)) {
             swapchain.recreate(window.getWidth(), window.getHeight());
-            postProcessRenderer.recreate(window.getWidth(), window.getHeight());
-            updateWaterDescriptorSets();
+            auto [targetRenderW, targetRenderH] = computeRenderResolution(options.resIndex, window.getWidth(), window.getHeight());
+            if (targetRenderW != postProcessRenderer.getWidth() || targetRenderH != postProcessRenderer.getHeight()) {
+                postProcessRenderer.recreate(targetRenderW, targetRenderH);
+                updateWaterDescriptorSets();
+            }
         }
 
         // Max FPS Framerate Limiter

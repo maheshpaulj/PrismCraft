@@ -174,7 +174,38 @@ void PostProcessRenderer::createResources(uint32_t width, uint32_t height) {
     VK_CHECK(vkCreateImageView(m_context.getDevice(), &depthViewInfo, nullptr, &m_ssrDepthImageView),
              "Failed to create PostProcess SSR depth image view!");
 
+    // Create Dedicated Scene Depth Target (sized to render resolution for 3D pass)
+    VkImageCreateInfo sceneDepthInfo{};
+    sceneDepthInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    sceneDepthInfo.imageType = VK_IMAGE_TYPE_2D;
+    sceneDepthInfo.extent = { m_width, m_height, 1 };
+    sceneDepthInfo.mipLevels = 1;
+    sceneDepthInfo.arrayLayers = 1;
+    sceneDepthInfo.format = m_depthFormat;
+    sceneDepthInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    sceneDepthInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    sceneDepthInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    sceneDepthInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    sceneDepthInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VK_CHECK(vmaCreateImage(m_context.getAllocator(), &sceneDepthInfo, &allocInfo, &m_sceneDepthImage, &m_sceneDepthAllocation, nullptr),
+             "Failed to allocate PostProcess scene depth image!");
+
+    VkImageViewCreateInfo sceneDepthViewInfo{};
+    sceneDepthViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    sceneDepthViewInfo.image = m_sceneDepthImage;
+    sceneDepthViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    sceneDepthViewInfo.format = m_depthFormat;
+    sceneDepthViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    sceneDepthViewInfo.subresourceRange.baseMipLevel = 0;
+    sceneDepthViewInfo.subresourceRange.levelCount = 1;
+    sceneDepthViewInfo.subresourceRange.baseArrayLayer = 0;
+    sceneDepthViewInfo.subresourceRange.layerCount = 1;
+    VK_CHECK(vkCreateImageView(m_context.getDevice(), &sceneDepthViewInfo, nullptr, &m_sceneDepthImageView),
+             "Failed to create PostProcess scene depth image view!");
+
     m_currentHDRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    m_currentDepthLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     m_currentSSRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     m_currentSSRDepthLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
@@ -183,6 +214,15 @@ void PostProcessRenderer::createResources(uint32_t width, uint32_t height) {
 }
 
 void PostProcessRenderer::cleanupResources() {
+    if (m_sceneDepthImageView != VK_NULL_HANDLE) {
+        vkDestroyImageView(m_context.getDevice(), m_sceneDepthImageView, nullptr);
+        m_sceneDepthImageView = VK_NULL_HANDLE;
+    }
+    if (m_sceneDepthImage != VK_NULL_HANDLE) {
+        vmaDestroyImage(m_context.getAllocator(), m_sceneDepthImage, m_sceneDepthAllocation);
+        m_sceneDepthImage = VK_NULL_HANDLE;
+        m_sceneDepthAllocation = VK_NULL_HANDLE;
+    }
     if (m_ssrDepthImageView != VK_NULL_HANDLE) {
         vkDestroyImageView(m_context.getDevice(), m_ssrDepthImageView, nullptr);
         m_ssrDepthImageView = VK_NULL_HANDLE;
@@ -304,6 +344,35 @@ void PostProcessRenderer::transitionHDRForSampling(VkCommandBuffer cmd) {
     m_currentHDRLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 }
 
+void PostProcessRenderer::transitionDepthForRendering(VkCommandBuffer cmd) {
+    if (m_currentDepthLayout == VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL) return;
+
+    VkImageMemoryBarrier2 barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    barrier.srcStageMask = (m_currentDepthLayout == VK_IMAGE_LAYOUT_UNDEFINED) ?
+        VK_PIPELINE_STAGE_2_NONE : (VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT);
+    barrier.srcAccessMask = (m_currentDepthLayout == VK_IMAGE_LAYOUT_UNDEFINED) ?
+        0 : (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+    barrier.oldLayout = m_currentDepthLayout;
+    barrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    barrier.image = m_sceneDepthImage;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkDependencyInfo depInfo{};
+    depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depInfo.imageMemoryBarrierCount = 1;
+    depInfo.pImageMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(cmd, &depInfo);
+
+    m_currentDepthLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+}
+
 void PostProcessRenderer::copyHDRToSSR(VkCommandBuffer cmd, VkImage sceneDepthImage) {
     // 1. Transition m_hdrImage from COLOR_ATTACHMENT_OPTIMAL to TRANSFER_SRC_OPTIMAL
     VkImageMemoryBarrier2 srcBarrier{};
@@ -390,7 +459,8 @@ void PostProcessRenderer::copyHDRToSSR(VkCommandBuffer cmd, VkImage sceneDepthIm
     m_currentSSRLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     // 6. Copy Scene Depth Buffer into m_ssrDepthImage for SSR depth testing
-    if (sceneDepthImage != VK_NULL_HANDLE && m_ssrDepthImage != VK_NULL_HANDLE) {
+    VkImage depthSource = (sceneDepthImage != VK_NULL_HANDLE) ? sceneDepthImage : m_sceneDepthImage;
+    if (depthSource != VK_NULL_HANDLE && m_ssrDepthImage != VK_NULL_HANDLE) {
         VkImageMemoryBarrier2 depthSrcBarrier{};
         depthSrcBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
         depthSrcBarrier.srcStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
@@ -399,7 +469,7 @@ void PostProcessRenderer::copyHDRToSSR(VkCommandBuffer cmd, VkImage sceneDepthIm
         depthSrcBarrier.dstAccessMask = VK_ACCESS_2_TRANSFER_READ_BIT;
         depthSrcBarrier.oldLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
         depthSrcBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        depthSrcBarrier.image = sceneDepthImage;
+        depthSrcBarrier.image = depthSource;
         depthSrcBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
         depthSrcBarrier.subresourceRange.baseMipLevel = 0;
         depthSrcBarrier.subresourceRange.levelCount = 1;
@@ -442,7 +512,7 @@ void PostProcessRenderer::copyHDRToSSR(VkCommandBuffer cmd, VkImage sceneDepthIm
         depthCopy.dstSubresource.layerCount = 1;
         depthCopy.dstOffset = { 0, 0, 0 };
         depthCopy.extent = { m_width, m_height, 1 };
-        vkCmdCopyImage(cmd, sceneDepthImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        vkCmdCopyImage(cmd, depthSource, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                        m_ssrDepthImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                        1, &depthCopy);
 
@@ -467,6 +537,7 @@ void PostProcessRenderer::copyHDRToSSR(VkCommandBuffer cmd, VkImage sceneDepthIm
         postDepDepth.pImageMemoryBarriers = postDepth;
         vkCmdPipelineBarrier2(cmd, &postDepDepth);
 
+        m_currentDepthLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
         m_currentSSRDepthLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     }
 }
