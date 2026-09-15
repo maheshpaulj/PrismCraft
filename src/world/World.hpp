@@ -14,6 +14,7 @@
 #include <shared_mutex>
 #include <unordered_set>
 #include <deque>
+#include <list>
 
 namespace prismcraft {
 
@@ -42,7 +43,7 @@ struct StagedMeshResult {
 
 class World {
 public:
-    World(VulkanContext& context, CommandQueue& cmdQueue, uint32_t seed = 12345);
+    World(VulkanContext& context, CommandQueue& cmdQueue, uint32_t seed = 12345, const std::string& worldFolder = "");
     ~World();
 
     // Call each frame with the player's position
@@ -76,11 +77,25 @@ public:
     void getLightLevels(int worldX, int y, int worldZ, int s, int& skyLight, int& blockLight) const;
 
     // Nearest placed torches for dynamic point light and shadow casting
-    [[nodiscard]] std::vector<glm::vec3> getNearestPlacedTorches(const glm::vec3& refPos, size_t maxCount = 4, float maxDist = 24.0f) const;
     [[nodiscard]] std::optional<glm::vec3> getNearestPlacedTorch(const glm::vec3& refPos, float maxDist = 12.0f) const;
+    [[nodiscard]] std::vector<glm::vec3> getNearestPlacedTorches(const glm::vec3& refPos, size_t maxCount = 4, float maxDist = 28.0f) const;
     
-    int renderDistance = 8; // in chunks
-    int lodPreset = 1;      // 0: Performance, 1: Balanced, 2: Quality, 3: Custom
+    // World persistence & folder
+    void setWorldFolder(const std::string& folder) { m_worldFolder = folder; }
+    [[nodiscard]] const std::string& getWorldFolder() const { return m_worldFolder; }
+    [[nodiscard]] const TerrainGen& getTerrainGen() const { return m_terrainGen; }
+    [[nodiscard]] TerrainGen& getTerrainGen() { return m_terrainGen; }
+    void saveAll(const class Player& player, float timeOfDay);
+
+    int renderDistance = 8; // in chunks (active interactive chunks)
+    int lodDistance = 128;  // in chunks (Distant Horizons LOD radius, up to 256)
+    int lodPreset = 1;      // 0: Performance, 1: Balanced, 2: Quality, 3: Extreme
+
+    void setRamCacheSize(int preset);
+    [[nodiscard]] size_t getCachedChunkCount() const;
+
+    [[nodiscard]] const ThreadPool& getThreadPool() const { return m_threadPool; }
+    [[nodiscard]] ThreadPool& getThreadPool() { return m_threadPool; }
     
 private:
     void queueChunksAround(const ChunkCoord& center);
@@ -96,11 +111,17 @@ private:
     VulkanContext& m_context;
     CommandQueue& m_cmdQueue;
     TerrainGen m_terrainGen;
+    std::string m_worldFolder;
     
     mutable std::shared_mutex m_chunksMutex;
     std::unordered_map<ChunkCoord, std::unique_ptr<Chunk>, ChunkCoordHash> m_chunks;
     std::unordered_map<ChunkCoord, ChunkRenderData, ChunkCoordHash> m_meshes;
     std::unordered_map<ChunkCoord, LODLevel, ChunkCoordHash> m_chunkLODs;
+
+    // High-RAM In-Memory LRU Chunk Cache
+    size_t m_maxCacheChunks = 16000; // Default ~2GB RAM capacity (128KB per chunk)
+    std::list<ChunkCoord> m_chunkLruOrder;
+    std::unordered_map<ChunkCoord, std::pair<std::unique_ptr<Chunk>, std::list<ChunkCoord>::iterator>, ChunkCoordHash> m_chunkCache;
 
     std::mutex m_queueMutex;
     std::unordered_set<ChunkCoord, ChunkCoordHash> m_pendingTasks;

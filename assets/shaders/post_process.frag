@@ -133,9 +133,9 @@ void main() {
             vec2 marchUV = sampleUV - stepVec * (float(i) + jitter * 0.75);
             vec3 s = texture(hdrSceneTexture, clamp(marchUV, 0.001, 0.999)).rgb;
 
-            // Extract high-luminance sky / cloud / sun disc pixels; occlude dark foliage/terrain
+            // Extract intense celestial light pixels ONLY (sun disc & sky horizon); NEVER lit terrain
             float luma = max(s.r, max(s.g, s.b));
-            float mask = smoothstep(0.85, 2.0, luma);
+            float mask = smoothstep(4.0, 9.0, luma);
 
             godRayAccum += s * mask * rayWeight;
             totalWeight += rayWeight;
@@ -149,13 +149,13 @@ void main() {
         vec3 rayColor = mix(vec3(1.02, 0.96, 0.88), vec3(1.15, 0.78, 0.38), goldenHour);
 
         // Soft screen border vignette so rays don't abruptly clip at viewport edges
-        float borderFade = smoothstep(0.0, 0.06, sampleUV.x) * smoothstep(1.0, 0.94, sampleUV.x) *
-                           smoothstep(0.0, 0.06, sampleUV.y) * smoothstep(1.0, 0.94, sampleUV.y);
+        float borderFade = smoothstep(0.0, 0.08, sampleUV.x) * smoothstep(1.0, 0.92, sampleUV.x) *
+                           smoothstep(0.0, 0.08, sampleUV.y) * smoothstep(1.0, 0.92, sampleUV.y);
 
         // Gentle central fade directly at sun center
-        float centerFade = smoothstep(0.015, 0.08, distToSun);
+        float centerFade = smoothstep(0.02, 0.12, distToSun);
 
-        float godRayStrength = 0.18 * pc.sunData.z * borderFade * centerFade;
+        float godRayStrength = 0.15 * pc.sunData.z * borderFade * centerFade;
         sceneRadiance += godRayAccum * rayColor * godRayStrength;
     }
 

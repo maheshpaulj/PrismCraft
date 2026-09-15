@@ -161,6 +161,10 @@
     <ClCompile Include="src\renderer\CloudMapGenerator.cpp" />
     <ClCompile Include="src\renderer\SkyRenderer.cpp" />
     <ClCompile Include="src\renderer\PostProcessRenderer.cpp" />
+    <ClCompile Include="src\renderer\TSRRenderer.cpp" />
+    <ClCompile Include="src\data\BlockRegistry.cpp" />
+    <ClCompile Include="src\renderer\TextureStitcher.cpp" />
+    <ClCompile Include="src\world\SaveManager.cpp" />
   </ItemGroup>
 
   <!-- Header Files (.hpp) -->
@@ -212,6 +216,12 @@
     <ClInclude Include="src\renderer\CloudMapGenerator.hpp" />
     <ClInclude Include="src\renderer\SkyRenderer.hpp" />
     <ClInclude Include="src\renderer\PostProcessRenderer.hpp" />
+    <ClInclude Include="src\renderer\TSRRenderer.hpp" />
+    <ClInclude Include="src\data\BlockRegistry.hpp" />
+    <ClInclude Include="src\data\SimpleJson.hpp" />
+    <ClInclude Include="src\renderer\TextureStitcher.hpp" />
+    <ClInclude Include="src\world\SaveManager.hpp" />
+    <ClInclude Include="src\world\Biome.hpp" />
   </ItemGroup>
 
   <!-- Shader Files -->

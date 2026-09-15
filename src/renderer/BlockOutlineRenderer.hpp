@@ -2,6 +2,7 @@
 #include "rhi/Buffer.hpp"
 #include "rhi/Pipeline.hpp"
 #include "world/Coordinates.hpp"
+#include "world/World.hpp"
 #include <glm/glm.hpp>
 #include <optional>
 
@@ -17,7 +18,8 @@ public:
     void render(VkCommandBuffer cmd,
                 const Pipeline& pipeline,
                 const std::optional<CellCoord>& targetCell,
-                const glm::mat4& vpMatrix);
+                const glm::mat4& vpMatrix,
+                const World& world);
 
 private:
     void buildPrismWireframe(int subIndex);
@@ -30,6 +32,10 @@ private:
 
     Buffer m_vbo1, m_ibo1;
     uint32_t m_indexCount1 = 0;
+
+    Buffer m_dynVbo[MAX_FRAMES_IN_FLIGHT];
+    Buffer m_dynIbo[MAX_FRAMES_IN_FLIGHT];
+    uint32_t m_dynIndexCount[MAX_FRAMES_IN_FLIGHT]{0, 0};
 };
 
 } // namespace prismcraft

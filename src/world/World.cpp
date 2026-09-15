@@ -1,24 +1,35 @@
 #include "world/World.hpp"
 #include "world/FallingBlockManager.hpp"
+#include "world/SaveManager.hpp"
 #include "player/Camera.hpp"
+#include "player/Player.hpp"
 #include "rhi/VulkanContext.hpp"
 #include "rhi/CommandQueue.hpp"
 #include <cmath>
 #include <algorithm>
+#include <iostream>
+#include <chrono>
 
 namespace prismcraft {
 
-World::World(VulkanContext& context, CommandQueue& cmdQueue, uint32_t seed)
+World::World(VulkanContext& context, CommandQueue& cmdQueue, uint32_t seed, const std::string& worldFolder)
     : m_context(context)
     , m_cmdQueue(cmdQueue)
     , m_terrainGen(seed)
+    , m_worldFolder(worldFolder)
 {
     // Synchronously generate initial spawn area (3x3 chunks) so basic height queries work
     for (int cx = -1; cx <= 1; ++cx) {
         for (int cz = -1; cz <= 1; ++cz) {
             ChunkCoord coord{cx, cz};
             auto chunk = std::make_unique<Chunk>(coord);
-            m_terrainGen.generateChunk(*chunk);
+            bool loaded = false;
+            if (!m_worldFolder.empty()) {
+                loaded = SaveManager::loadChunk(m_worldFolder, *chunk);
+            }
+            if (!loaded) {
+                m_terrainGen.generateChunk(*chunk);
+            }
             m_chunks[coord] = std::move(chunk);
         }
     }
@@ -26,6 +37,70 @@ World::World(VulkanContext& context, CommandQueue& cmdQueue, uint32_t seed)
 
 World::~World() {
     m_threadPool.shutdown();
+    if (!m_worldFolder.empty()) {
+        std::shared_lock<std::shared_mutex> lock(m_chunksMutex);
+        for (const auto& [coord, chunk] : m_chunks) {
+            if (chunk && chunk->isDirty()) {
+                SaveManager::saveChunk(m_worldFolder, *chunk);
+            }
+        }
+    }
+}
+
+void World::saveAll(const Player& player, float timeOfDay) {
+    if (m_worldFolder.empty()) return;
+
+    // 1. Save all dirty loaded chunks
+    {
+        std::shared_lock<std::shared_mutex> lock(m_chunksMutex);
+        for (const auto& [coord, chunk] : m_chunks) {
+            if (chunk && chunk->isDirty()) {
+                SaveManager::saveChunk(m_worldFolder, *chunk);
+                chunk->clearDirty();
+            }
+        }
+    }
+
+    // 2. Save world metadata and player state
+    WorldMetadata meta;
+    if (!SaveManager::loadWorldMetadata(m_worldFolder, meta)) {
+        meta.name = m_worldFolder;
+        meta.folderName = m_worldFolder;
+        meta.seed = m_terrainGen.getSeed();
+    }
+    meta.lastPlayed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    meta.lastPlayedFormatted = SaveManager::formatTimestamp(meta.lastPlayed);
+    meta.timeOfDay = timeOfDay;
+    meta.gameMode = player.isCreative() ? 1 : 0;
+
+    meta.playerPos = player.getPosition();
+    meta.yaw = player.getCamera().getYaw();
+    meta.pitch = player.getCamera().getPitch();
+    meta.health = player.getHealth();
+    meta.hunger = player.getHunger();
+    meta.selectedSlot = player.getSelectedSlot();
+
+    meta.inventory.clear();
+    // Hotbar (slots 0..9)
+    for (int s = 0; s < 10; ++s) {
+        BlockType t = player.getHotbarBlock(s);
+        int c = player.getHotbarCount(s);
+        if (t != BlockType::Air && c > 0) {
+            meta.inventory.push_back({s, t, c});
+        }
+    }
+    // Storage (slots 10..39)
+    for (int s = 0; s < 30; ++s) {
+        BlockType t = player.getStorageBlock(s);
+        int c = player.getStorageCount(s);
+        if (t != BlockType::Air && c > 0) {
+            meta.inventory.push_back({s + 10, t, c});
+        }
+    }
+
+    SaveManager::saveWorldMetadata(m_worldFolder, meta);
+    std::cout << "[World] Saved world state and dirty chunks for: " << m_worldFolder << std::endl;
 }
 
 void World::update(const glm::vec3& playerPos, float dt) {
@@ -79,13 +154,17 @@ void World::update(const glm::vec3& playerPos, float dt) {
 }
 
 LODLevel World::calculateTargetLOD(int distChunks, std::optional<LODLevel> currentLOD) const {
-    int t0 = 16, t1 = 48, t2 = 96;
+    int t0 = renderDistance;
+    int t1 = 24, t2 = 48, t3 = 96;
     if (lodPreset == 0) { // Performance: aggressive LOD
-        t0 = 8; t1 = 24; t2 = 64;
+        t0 = std::min(renderDistance, 6);
+        t1 = 16; t2 = 36; t3 = 72;
     } else if (lodPreset == 2) { // Quality
-        t0 = 24; t1 = 64; t2 = 128;
-    } else if (lodPreset == 3) { // Custom / Ultra
-        t0 = 32; t1 = 80; t2 = 160;
+        t0 = std::max(renderDistance, 12);
+        t1 = 32; t2 = 64; t3 = 128;
+    } else if (lodPreset == 3) { // Extreme / Distant Horizons Ultra
+        t0 = std::max(renderDistance, 16);
+        t1 = 48; t2 = 96; t3 = 160;
     }
 
     // If no existing mesh, assign LOD tier directly without hysteresis offsets
@@ -93,37 +172,51 @@ LODLevel World::calculateTargetLOD(int distChunks, std::optional<LODLevel> curre
         if (distChunks <= t0) return LODLevel::LOD0_Full;
         if (distChunks <= t1) return LODLevel::LOD1_Medium;
         if (distChunks <= t2) return LODLevel::LOD2_Coarse;
-        return LODLevel::LOD3_Imposter;
+        if (distChunks <= t3) return LODLevel::LOD3_Imposter;
+        return LODLevel::LOD4_Extreme;
     }
 
     // Apply Hysteresis: prevent flickering between LOD tiers for existing meshes
     LODLevel cur = currentLOD.value();
     if (cur == LODLevel::LOD0_Full) {
         if (distChunks > t0 + 2) {
-            return (distChunks <= t1) ? LODLevel::LOD1_Medium : ((distChunks <= t2) ? LODLevel::LOD2_Coarse : LODLevel::LOD3_Imposter);
+            if (distChunks <= t1) return LODLevel::LOD1_Medium;
+            if (distChunks <= t2) return LODLevel::LOD2_Coarse;
+            if (distChunks <= t3) return LODLevel::LOD3_Imposter;
+            return LODLevel::LOD4_Extreme;
         }
         return LODLevel::LOD0_Full;
     } else if (cur == LODLevel::LOD1_Medium) {
         if (distChunks <= t0 - 2) return LODLevel::LOD0_Full;
         if (distChunks > t1 + 3) {
-            return (distChunks <= t2) ? LODLevel::LOD2_Coarse : LODLevel::LOD3_Imposter;
+            if (distChunks <= t2) return LODLevel::LOD2_Coarse;
+            if (distChunks <= t3) return LODLevel::LOD3_Imposter;
+            return LODLevel::LOD4_Extreme;
         }
         return LODLevel::LOD1_Medium;
     } else if (cur == LODLevel::LOD2_Coarse) {
         if (distChunks <= t1 - 3) return LODLevel::LOD1_Medium;
-        if (distChunks > t2 + 4) return LODLevel::LOD3_Imposter;
+        if (distChunks > t2 + 4) {
+            if (distChunks <= t3) return LODLevel::LOD3_Imposter;
+            return LODLevel::LOD4_Extreme;
+        }
         return LODLevel::LOD2_Coarse;
-    } else { // LOD3_Imposter
+    } else if (cur == LODLevel::LOD3_Imposter) {
         if (distChunks <= t2 - 4) return LODLevel::LOD2_Coarse;
+        if (distChunks > t3 + 6) return LODLevel::LOD4_Extreme;
         return LODLevel::LOD3_Imposter;
+    } else { // LOD4_Extreme
+        if (distChunks <= t3 - 6) return LODLevel::LOD3_Imposter;
+        return LODLevel::LOD4_Extreme;
     }
 }
 
 void World::queueChunksAround(const ChunkCoord& center) {
     size_t enqueuedThisCall = 0;
-    const size_t maxEnqueuePerFrame = 64;
+    const size_t maxEnqueuePerFrame = std::max<size_t>(160, m_threadPool.threadCount() * 32);
+    int maxSearchRadius = std::max(renderDistance, lodDistance);
 
-    for (int r = 0; r <= renderDistance; ++r) {
+    for (int r = 0; r <= maxSearchRadius; ++r) {
         for (int dx = -r; dx <= r; ++dx) {
             for (int dz = -r; dz <= r; ++dz) {
                 if (std::max(std::abs(dx), std::abs(dz)) != r) continue;
@@ -152,9 +245,17 @@ void World::queueChunksAround(const ChunkCoord& center) {
                     m_pendingTasks.insert(coord);
                 }
 
-                if (targetLOD == LODLevel::LOD3_Imposter) {
+                if (targetLOD == LODLevel::LOD4_Extreme) {
                     m_threadPool.enqueueTask([this, coord, targetLOD]() {
-                        ChunkMesh mesh = ChunkMesher::generateImposterMesh(coord, this->m_terrainGen);
+                        ChunkMesh mesh = ChunkMesher::generateImposterMesh(coord, this->m_terrainGen, 16);
+                        {
+                            std::lock_guard<std::mutex> lock(this->m_queueMutex);
+                            this->m_stagedMeshes.push_back({coord, std::move(mesh), targetLOD, true});
+                        }
+                    });
+                } else if (targetLOD == LODLevel::LOD3_Imposter) {
+                    m_threadPool.enqueueTask([this, coord, targetLOD]() {
+                        ChunkMesh mesh = ChunkMesher::generateImposterMesh(coord, this->m_terrainGen, 8);
                         {
                             std::lock_guard<std::mutex> lock(this->m_queueMutex);
                             this->m_stagedMeshes.push_back({coord, std::move(mesh), targetLOD, true});
@@ -172,13 +273,20 @@ void World::queueChunksAround(const ChunkCoord& center) {
                     });
                 } else {
                     m_threadPool.enqueueTask([this, coord, targetLOD]() {
-                        // 1. Check which chunks need generation under a fast shared lock
+                        // 1. Check which chunks need generation, checking active chunks and RAM LRU cache
                         bool needCoord = false;
                         std::vector<ChunkCoord> missingNeighbors;
                         {
-                            std::shared_lock<std::shared_mutex> rlock(this->m_chunksMutex);
+                            std::unique_lock<std::shared_mutex> wlock(this->m_chunksMutex);
                             if (this->m_chunks.find(coord) == this->m_chunks.end()) {
-                                needCoord = true;
+                                auto cit = this->m_chunkCache.find(coord);
+                                if (cit != this->m_chunkCache.end()) {
+                                    this->m_chunkLruOrder.erase(cit->second.second);
+                                    this->m_chunks[coord] = std::move(cit->second.first);
+                                    this->m_chunkCache.erase(cit);
+                                } else {
+                                    needCoord = true;
+                                }
                             }
                             if (targetLOD == LODLevel::LOD0_Full) {
                                 ChunkCoord neighbors[4] = {
@@ -187,23 +295,42 @@ void World::queueChunksAround(const ChunkCoord& center) {
                                 };
                                 for (const auto& nc : neighbors) {
                                     if (this->m_chunks.find(nc) == this->m_chunks.end()) {
-                                        missingNeighbors.push_back(nc);
+                                        auto ncit = this->m_chunkCache.find(nc);
+                                        if (ncit != this->m_chunkCache.end()) {
+                                            this->m_chunkLruOrder.erase(ncit->second.second);
+                                            this->m_chunks[nc] = std::move(ncit->second.first);
+                                            this->m_chunkCache.erase(ncit);
+                                        } else {
+                                            missingNeighbors.push_back(nc);
+                                        }
                                     }
                                 }
                             }
                         }
 
-                        // 2. Generate missing chunks in parallel OUTSIDE any lock
+                        // 2. Load from disk if saved, otherwise generate missing chunks in parallel OUTSIDE any lock
                         std::unique_ptr<Chunk> newCoordChunk;
                         if (needCoord) {
                             newCoordChunk = std::make_unique<Chunk>(coord);
-                            this->m_terrainGen.generateChunk(*newCoordChunk);
+                            bool loaded = false;
+                            if (!this->m_worldFolder.empty()) {
+                                loaded = SaveManager::loadChunk(this->m_worldFolder, *newCoordChunk);
+                            }
+                            if (!loaded) {
+                                this->m_terrainGen.generateChunk(*newCoordChunk);
+                            }
                         }
 
                         std::vector<std::pair<ChunkCoord, std::unique_ptr<Chunk>>> newNeighbors;
                         for (const auto& nc : missingNeighbors) {
                             auto nChunk = std::make_unique<Chunk>(nc);
-                            this->m_terrainGen.generateChunk(*nChunk);
+                            bool loaded = false;
+                            if (!this->m_worldFolder.empty()) {
+                                loaded = SaveManager::loadChunk(this->m_worldFolder, *nChunk);
+                            }
+                            if (!loaded) {
+                                this->m_terrainGen.generateChunk(*nChunk);
+                            }
                             newNeighbors.emplace_back(nc, std::move(nChunk));
                         }
 
@@ -271,7 +398,11 @@ void World::processStagedUploads(size_t maxUploads) {
     {
         std::lock_guard<std::mutex> lock(m_queueMutex);
         if (m_stagedMeshes.empty()) return;
-        size_t count = std::min(m_stagedMeshes.size(), maxUploads);
+        size_t dynamicMax = std::max<size_t>(maxUploads, m_threadPool.threadCount() * 8);
+        if (m_stagedMeshes.size() > 16) {
+            dynamicMax = std::min(m_stagedMeshes.size(), std::max<size_t>(64, m_threadPool.threadCount() * 16));
+        }
+        size_t count = std::min(m_stagedMeshes.size(), dynamicMax);
         for (size_t i = 0; i < count; ++i) {
             toUpload.push_back(std::move(m_stagedMeshes.front()));
             m_stagedMeshes.pop_front();
@@ -377,9 +508,9 @@ void World::uploadMeshesBatched(std::vector<StagedMeshResult>& items) {
 }
 
 void World::unloadDistantChunks(const ChunkCoord& center) {
-    int maxDist = renderDistance + 6;
+    int maxDist = std::max(renderDistance, lodDistance) + 8;
 
-    // 1. Unload GPU meshes beyond renderDistance + 6
+    // 1. Unload GPU meshes beyond lodDistance + 8
     for (auto it = m_meshes.begin(); it != m_meshes.end(); ) {
         int dist = std::max(std::abs(it->first.cx - center.cx), std::abs(it->first.cz - center.cz));
         if (dist > maxDist) {
@@ -390,7 +521,7 @@ void World::unloadDistantChunks(const ChunkCoord& center) {
         }
     }
 
-    // 2. Unload voxel block RAM for chunks outside active radius (scales with render distance)
+    // 2. Unload voxel block RAM into High-RAM LRU Cache for chunks outside active radius
     int maxVoxelDist = renderDistance + 4;
     {
         std::unique_lock<std::shared_mutex> lock(m_chunksMutex);
@@ -398,12 +529,48 @@ void World::unloadDistantChunks(const ChunkCoord& center) {
         for (auto it = m_chunks.begin(); it != m_chunks.end(); ) {
             int dist = std::max(std::abs(it->first.cx - center.cx), std::abs(it->first.cz - center.cz));
             if (dist > maxVoxelDist && m_pendingTasks.find(it->first) == m_pendingTasks.end()) {
+                ChunkCoord c = it->first;
+                // Move into High-RAM LRU cache
+                if (m_chunkCache.find(c) != m_chunkCache.end()) {
+                    m_chunkLruOrder.erase(m_chunkCache[c].second);
+                }
+                m_chunkLruOrder.push_front(c);
+                m_chunkCache[c] = { std::move(it->second), m_chunkLruOrder.begin() };
                 it = m_chunks.erase(it);
+
+                // Evict oldest chunk if exceeding RAM capacity limit
+                while (m_chunkCache.size() > m_maxCacheChunks && !m_chunkLruOrder.empty()) {
+                    ChunkCoord oldest = m_chunkLruOrder.back();
+                    m_chunkLruOrder.pop_back();
+                    auto cit = m_chunkCache.find(oldest);
+                    if (cit != m_chunkCache.end()) {
+                        if (!m_worldFolder.empty() && cit->second.first && cit->second.first->isDirty()) {
+                            SaveManager::saveChunk(m_worldFolder, *cit->second.first);
+                        }
+                        m_chunkCache.erase(cit);
+                    }
+                }
             } else {
                 ++it;
             }
         }
     }
+}
+
+void World::setRamCacheSize(int preset) {
+    // 0: 512MB (4k chunks), 1: 1GB (8k chunks), 2: 2GB (16k chunks), 3: 4GB (32k chunks)
+    switch (preset) {
+        case 0: m_maxCacheChunks = 4000; break;
+        case 1: m_maxCacheChunks = 8000; break;
+        case 2: m_maxCacheChunks = 16000; break;
+        case 3: m_maxCacheChunks = 32000; break;
+        default: m_maxCacheChunks = 16000; break;
+    }
+}
+
+size_t World::getCachedChunkCount() const {
+    std::shared_lock<std::shared_mutex> lock(m_chunksMutex);
+    return m_chunkCache.size();
 }
 
 void World::meshChunk(const ChunkCoord& coord, LODLevel lod) {
@@ -485,12 +652,18 @@ void World::uploadMesh(const ChunkCoord& coord, const ChunkMesh& mesh, LODLevel 
 
 Chunk* World::getChunk(const ChunkCoord& coord) {
     auto it = m_chunks.find(coord);
-    return it != m_chunks.end() ? it->second.get() : nullptr;
+    if (it != m_chunks.end()) return it->second.get();
+    auto cit = m_chunkCache.find(coord);
+    if (cit != m_chunkCache.end()) return cit->second.first.get();
+    return nullptr;
 }
 
 const Chunk* World::getChunk(const ChunkCoord& coord) const {
     auto it = m_chunks.find(coord);
-    return it != m_chunks.end() ? it->second.get() : nullptr;
+    if (it != m_chunks.end()) return it->second.get();
+    auto cit = m_chunkCache.find(coord);
+    if (cit != m_chunkCache.end()) return cit->second.first.get();
+    return nullptr;
 }
 
 Cell World::getCell(int worldX, int y, int worldZ, int s) const {

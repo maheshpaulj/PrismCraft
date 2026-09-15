@@ -17,9 +17,10 @@ public:
     explicit ThreadPool(size_t numThreads = 0)
         : m_stop(false)
     {
+        unsigned int hw = std::thread::hardware_concurrency();
+        m_hardwareThreads = (hw > 0) ? hw : 2;
         if (numThreads == 0) {
-            unsigned int hw = std::thread::hardware_concurrency();
-            numThreads = (hw > 1) ? std::clamp(hw - 1, 2u, 8u) : 2u;
+            numThreads = (m_hardwareThreads > 1) ? (m_hardwareThreads - 1) : 1;
         }
 
         for (size_t i = 0; i < numThreads; ++i) {
@@ -113,7 +114,12 @@ public:
         return m_workers.size();
     }
 
+    size_t getHardwareThreads() const {
+        return m_hardwareThreads;
+    }
+
 private:
+    size_t m_hardwareThreads = 0;
     std::vector<std::thread> m_workers;
     std::queue<std::function<void()>> m_tasks;
     std::mutex m_queueMutex;

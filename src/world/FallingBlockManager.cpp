@@ -84,13 +84,40 @@ void FallingBlockManager::render(VkCommandBuffer cmd, const Pipeline& pipeline, 
         glm::vec4 uvTop  = TextureAtlas::getTileUV(topTile);
         glm::vec4 uvBot  = TextureAtlas::getTileUV(botTile);
 
+        glm::vec2 uvT0, uvT1, uvT2;
+        if (fb.s == 0) {
+            // Up-pointing triangle: (0,0), (1,0), (0,1)
+            uvT0 = glm::vec2(uvTop.x, uvTop.y);
+            uvT1 = glm::vec2(uvTop.z, uvTop.y);
+            uvT2 = glm::vec2(uvTop.x, uvTop.w);
+        } else {
+            // Down-pointing triangle: (1,0), (1,1), (0,1)
+            uvT0 = glm::vec2(uvTop.z, uvTop.y);
+            uvT1 = glm::vec2(uvTop.z, uvTop.w);
+            uvT2 = glm::vec2(uvTop.x, uvTop.w);
+        }
+
+        glm::vec2 uvB0, uvB1, uvB2;
+        if (fb.s == 0) {
+            // Up-pointing triangle: (0,0), (1,0), (0,1)
+            uvB0 = glm::vec2(uvBot.x, uvBot.y);
+            uvB1 = glm::vec2(uvBot.z, uvBot.y);
+            uvB2 = glm::vec2(uvBot.x, uvBot.w);
+        } else {
+            // Down-pointing triangle: (1,0), (1,1), (0,1)
+            uvB0 = glm::vec2(uvBot.z, uvBot.y);
+            uvB1 = glm::vec2(uvBot.z, uvBot.w);
+            uvB2 = glm::vec2(uvBot.x, uvBot.w);
+        }
+
         auto addTri = [&](const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2,
-                          const glm::vec3& norm, const glm::vec4& uv) {
+                          const glm::vec2& uv0, const glm::vec2& uv1, const glm::vec2& uv2,
+                          const glm::vec3& norm) {
             uint32_t b = static_cast<uint32_t>(vertices.size());
             glm::vec3 col(1.0f);
-            vertices.push_back({p0, glm::vec2(uv.x, uv.y), norm, col});
-            vertices.push_back({p1, glm::vec2(uv.z, uv.y), norm, col});
-            vertices.push_back({p2, glm::vec2(uv.x, uv.w), norm, col});
+            vertices.push_back({p0, uv0, norm, col});
+            vertices.push_back({p1, uv1, norm, col});
+            vertices.push_back({p2, uv2, norm, col});
             indices.push_back(b + 0); indices.push_back(b + 1); indices.push_back(b + 2);
         };
 
@@ -115,10 +142,10 @@ void FallingBlockManager::render(VkCommandBuffer cmd, const Pipeline& pipeline, 
             indices.push_back(bIdx + 0); indices.push_back(bIdx + 2); indices.push_back(bIdx + 3);
         };
 
-        // Top face (CCW: p0 -> p1 -> p2)
-        addTri(p0_top, p1_top, p2_top, glm::vec3(0.0f, 1.0f, 0.0f), uvTop);
-        // Bottom face (CCW: p0 -> p2 -> p1)
-        addTri(p0_bot, p2_bot, p1_bot, glm::vec3(0.0f, -1.0f, 0.0f), uvBot);
+        // Top face (CCW: p0 -> p2 -> p1)
+        addTri(p0_top, p2_top, p1_top, uvT0, uvT2, uvT1, glm::vec3(0.0f, 1.0f, 0.0f));
+        // Bottom face (CCW: p0 -> p1 -> p2)
+        addTri(p0_bot, p1_bot, p2_bot, uvB0, uvB1, uvB2, glm::vec3(0.0f, -1.0f, 0.0f));
 
         // 3 side walls
         addWallQuad(p0_bot, p1_bot, y0, y1);

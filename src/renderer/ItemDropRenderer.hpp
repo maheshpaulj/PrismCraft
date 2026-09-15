@@ -29,7 +29,7 @@ class ItemDropManager {
 public:
     ItemDropManager(VulkanContext& context, CommandQueue& cmdQueue);
 
-    void spawnDrop(const glm::vec3& pos, BlockType type, const glm::vec3& vel = glm::vec3(0.0f, 3.2f, 0.0f));
+    void spawnDrop(const glm::vec3& pos, BlockType type, const glm::vec3& vel = glm::vec3(0.0f, 1.2f, 0.0f));
     void update(float dt, const World& world, Player& player);
 
     // Returns (worldPos, intensity) of the nearest active dropped torch

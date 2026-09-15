@@ -1,0 +1,1478 @@
+{
+  "format_version": 1,
+  "blocks": {
+    "grass": {
+      "id": 1,
+      "display_name": "Grass Block",
+      "render_type": "standard",
+      "textures": {
+        "top": "grass_block_top",
+        "bottom": "dirt",
+        "sides": "grass_block_side"
+      },
+      "tint": { "top": [110, 190, 65] },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 0.6,
+        "tool": "shovel",
+        "drops": "dirt",
+        "sound": "grass"
+      },
+      "tags": ["natural", "terrain", "dirt"]
+    },
+    "dirt": {
+      "id": 2,
+      "display_name": "Dirt",
+      "render_type": "standard",
+      "textures": { "all": "dirt" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 0.5,
+        "tool": "shovel",
+        "drops": "dirt",
+        "sound": "gravel"
+      },
+      "tags": ["natural", "terrain", "dirt"]
+    },
+    "stone": {
+      "id": 3,
+      "display_name": "Stone",
+      "render_type": "standard",
+      "textures": { "all": "stone" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 1.5,
+        "tool": "pickaxe",
+        "drops": "cobblestone",
+        "sound": "stone"
+      },
+      "tags": ["stone", "natural"]
+    },
+    "sand": {
+      "id": 4,
+      "display_name": "Sand",
+      "render_type": "standard",
+      "textures": { "all": "sand" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 0.5,
+        "tool": "shovel",
+        "drops": "sand",
+        "sound": "sand"
+      },
+      "tags": ["sand", "gravity", "natural"]
+    },
+    "wood": {
+      "id": 5,
+      "display_name": "Oak Log",
+      "render_type": "standard",
+      "textures": {
+        "top": "oak_log_top",
+        "bottom": "oak_log_top",
+        "sides": "oak_log"
+      },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 2.0,
+        "tool": "axe",
+        "drops": "oak_log",
+        "sound": "wood"
+      },
+      "tags": ["wood", "log", "flammable"]
+    },
+    "leaves": {
+      "id": 6,
+      "display_name": "Oak Leaves",
+      "render_type": "standard",
+      "textures": { "all": "oak_leaves" },
+      "tint": { "top": [115, 210, 45] },
+      "properties": {
+        "solid": true,
+        "opaque": false,
+        "hardness": 0.2,
+        "tool": "shears",
+        "drops": "oak_sapling",
+        "sound": "grass"
+      },
+      "tags": ["leaves", "foliage", "flammable"]
+    },
+    "water": {
+      "id": 7,
+      "display_name": "Water",
+      "render_type": "standard",
+      "textures": { "all": "water_still" },
+      "properties": {
+        "solid": false,
+        "opaque": false,
+        "hardness": 100.0,
+        "tool": "none",
+        "drops": "none",
+        "sound": "water"
+      },
+      "tags": ["liquid", "fluid"]
+    },
+    "bedrock": {
+      "id": 8,
+      "display_name": "Bedrock",
+      "render_type": "standard",
+      "textures": { "all": "bedrock" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": -1.0,
+        "tool": "none",
+        "drops": "none",
+        "sound": "stone"
+      },
+      "tags": ["unbreakable"]
+    },
+    "planks": {
+      "id": 9,
+      "display_name": "Oak Planks",
+      "render_type": "standard",
+      "textures": { "all": "oak_planks" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 2.0,
+        "tool": "axe",
+        "drops": "oak_planks",
+        "sound": "wood"
+      },
+      "tags": ["wood", "planks", "flammable"]
+    },
+    "cobblestone": {
+      "id": 10,
+      "display_name": "Cobblestone",
+      "render_type": "standard",
+      "textures": { "all": "cobblestone" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 2.0,
+        "tool": "pickaxe",
+        "drops": "cobblestone",
+        "sound": "stone"
+      },
+      "tags": ["stone"]
+    },
+    "glass": {
+      "id": 11,
+      "display_name": "Glass",
+      "render_type": "standard",
+      "textures": { "all": "glass" },
+      "properties": {
+        "solid": true,
+        "opaque": false,
+        "hardness": 0.3,
+        "tool": "none",
+        "drops": "none",
+        "sound": "glass"
+      },
+      "tags": ["transparent"]
+    },
+    "crafting_table": {
+      "id": 12,
+      "display_name": "Crafting Table",
+      "render_type": "standard",
+      "textures": {
+        "top": "crafting_table_top",
+        "bottom": "oak_planks",
+        "front": "crafting_table_front",
+        "sides": "crafting_table_side"
+      },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 2.5,
+        "tool": "axe",
+        "drops": "crafting_table",
+        "sound": "wood"
+      },
+      "tags": ["workstation", "interactable"]
+    },
+    "furnace": {
+      "id": 13,
+      "display_name": "Furnace",
+      "render_type": "standard",
+      "textures": {
+        "top": "furnace_top",
+        "bottom": "stone",
+        "front": "furnace_front",
+        "sides": "furnace_side"
+      },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 3.5,
+        "tool": "pickaxe",
+        "drops": "furnace",
+        "sound": "stone"
+      },
+      "tags": ["workstation", "interactable"]
+    },
+    "coal_ore": {
+      "id": 14,
+      "display_name": "Coal Ore",
+      "render_type": "standard",
+      "textures": { "all": "coal_ore" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 3.0,
+        "tool": "pickaxe",
+        "drops": "coal",
+        "sound": "stone"
+      },
+      "tags": ["ore", "stone"]
+    },
+    "iron_ore": {
+      "id": 15,
+      "display_name": "Iron Ore",
+      "render_type": "standard",
+      "textures": { "all": "iron_ore" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 3.0,
+        "tool": "pickaxe",
+        "drops": "iron_ore",
+        "sound": "stone"
+      },
+      "tags": ["ore", "stone"]
+    },
+    "gold_ore": {
+      "id": 16,
+      "display_name": "Gold Ore",
+      "render_type": "standard",
+      "textures": { "all": "gold_ore" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 3.0,
+        "tool": "pickaxe",
+        "drops": "gold_ore",
+        "sound": "stone"
+      },
+      "tags": ["ore", "stone"]
+    },
+    "diamond_ore": {
+      "id": 17,
+      "display_name": "Diamond Ore",
+      "render_type": "standard",
+      "textures": { "all": "diamond_ore" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 3.0,
+        "tool": "pickaxe",
+        "drops": "diamond",
+        "sound": "stone"
+      },
+      "tags": ["ore", "stone"]
+    },
+    "gravel": {
+      "id": 18,
+      "display_name": "Gravel",
+      "render_type": "standard",
+      "textures": { "all": "gravel" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 0.6,
+        "tool": "shovel",
+        "drops": "flint",
+        "sound": "gravel"
+      },
+      "tags": ["gravity", "natural"]
+    },
+    "snow": {
+      "id": 19,
+      "display_name": "Snow Block",
+      "render_type": "standard",
+      "textures": { "all": "snow" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 0.2,
+        "tool": "shovel",
+        "drops": "snowball",
+        "sound": "snow"
+      },
+      "tags": ["snow", "natural"]
+    },
+    "tall_grass": {
+      "id": 20,
+      "display_name": "Grass",
+      "render_type": "foliage",
+      "textures": { "all": "short_grass" },
+      "tint": { "top": [110, 190, 65] },
+      "properties": {
+        "solid": false,
+        "opaque": false,
+        "hardness": 0.0,
+        "tool": "shears",
+        "drops": "wheat_seeds",
+        "sound": "grass"
+      },
+      "tags": ["foliage", "plant"]
+    },
+    "flower_rose": {
+      "id": 21,
+      "display_name": "Poppy",
+      "render_type": "foliage",
+      "textures": { "all": "poppy" },
+      "properties": {
+        "solid": false,
+        "opaque": false,
+        "hardness": 0.0,
+        "tool": "none",
+        "drops": "flower_rose",
+        "sound": "grass"
+      },
+      "tags": ["flower", "foliage"]
+    },
+    "flower_dandelion": {
+      "id": 22,
+      "display_name": "Dandelion",
+      "render_type": "foliage",
+      "textures": { "all": "dandelion" },
+      "properties": {
+        "solid": false,
+        "opaque": false,
+        "hardness": 0.0,
+        "tool": "none",
+        "drops": "flower_dandelion",
+        "sound": "grass"
+      },
+      "tags": ["flower", "foliage"]
+    },
+    "torch": {
+      "id": 23,
+      "display_name": "Torch",
+      "render_type": "torch",
+      "textures": { "all": "torch" },
+      "properties": {
+        "solid": false,
+        "opaque": false,
+        "light_level": 14,
+        "hardness": 0.0,
+        "tool": "none",
+        "drops": "torch",
+        "sound": "wood"
+      },
+      "tags": ["light_source", "attachable"]
+    },
+    "lantern": {
+      "id": 24,
+      "display_name": "Lantern",
+      "render_type": "lantern",
+      "textures": { "all": "lantern" },
+      "properties": {
+        "solid": false,
+        "opaque": false,
+        "light_level": 15,
+        "hardness": 3.5,
+        "tool": "pickaxe",
+        "drops": "lantern",
+        "sound": "lantern"
+      },
+      "tags": ["light_source", "emissive", "hangable"]
+    },
+    "smooth_stone": {
+      "id": 25,
+      "display_name": "Smooth Stone",
+      "render_type": "standard",
+      "textures": { "all": "smooth_stone" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 2.0,
+        "tool": "pickaxe",
+        "drops": "smooth_stone",
+        "sound": "stone"
+      },
+      "tags": ["stone"]
+    },
+    "redstone_ore": {
+      "id": 26,
+      "display_name": "Redstone Ore",
+      "render_type": "standard",
+      "textures": { "all": "redstone_ore" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 3.0,
+        "tool": "pickaxe",
+        "drops": "redstone",
+        "sound": "stone"
+      },
+      "tags": ["ore", "stone"]
+    },
+    "emerald_ore": {
+      "id": 27,
+      "display_name": "Emerald Ore",
+      "render_type": "standard",
+      "textures": { "all": "emerald_ore" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 3.0,
+        "tool": "pickaxe",
+        "drops": "emerald",
+        "sound": "stone"
+      },
+      "tags": ["ore", "stone"]
+    },
+    "nether_quartz_ore": {
+      "id": 28,
+      "display_name": "Nether Quartz Ore",
+      "render_type": "standard",
+      "textures": { "all": "nether_quartz_ore" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 3.0,
+        "tool": "pickaxe",
+        "drops": "quartz",
+        "sound": "stone"
+      },
+      "tags": ["ore", "nether"]
+    },
+    "iron_block": {
+      "id": 29,
+      "display_name": "Block of Iron",
+      "render_type": "standard",
+      "textures": { "all": "iron_block" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 5.0,
+        "tool": "pickaxe",
+        "drops": "iron_block",
+        "sound": "metal"
+      },
+      "tags": ["mineral", "metal"]
+    },
+    "gold_block": {
+      "id": 30,
+      "display_name": "Block of Gold",
+      "render_type": "standard",
+      "textures": { "all": "gold_block" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 3.0,
+        "tool": "pickaxe",
+        "drops": "gold_block",
+        "sound": "metal"
+      },
+      "tags": ["mineral", "metal"]
+    },
+    "diamond_block": {
+      "id": 31,
+      "display_name": "Block of Diamond",
+      "render_type": "standard",
+      "textures": { "all": "diamond_block" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 5.0,
+        "tool": "pickaxe",
+        "drops": "diamond_block",
+        "sound": "metal"
+      },
+      "tags": ["mineral"]
+    },
+    "emerald_block": {
+      "id": 32,
+      "display_name": "Block of Emerald",
+      "render_type": "standard",
+      "textures": { "all": "emerald_block" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 5.0,
+        "tool": "pickaxe",
+        "drops": "emerald_block",
+        "sound": "metal"
+      },
+      "tags": ["mineral"]
+    },
+    "redstone_block": {
+      "id": 33,
+      "display_name": "Block of Redstone",
+      "render_type": "standard",
+      "textures": { "all": "redstone_block" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 5.0,
+        "tool": "pickaxe",
+        "drops": "redstone_block",
+        "sound": "metal"
+      },
+      "tags": ["mineral", "redstone"]
+    },
+    "bookshelf": {
+      "id": 34,
+      "display_name": "Bookshelf",
+      "render_type": "standard",
+      "textures": {
+        "top": "oak_planks",
+        "bottom": "oak_planks",
+        "sides": "bookshelf"
+      },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 1.5,
+        "tool": "axe",
+        "drops": "book",
+        "sound": "wood"
+      },
+      "tags": ["wood", "decorative"]
+    },
+    "mossy_cobblestone": {
+      "id": 35,
+      "display_name": "Mossy Cobblestone",
+      "render_type": "standard",
+      "textures": { "all": "mossy_cobblestone" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 2.0,
+        "tool": "pickaxe",
+        "drops": "mossy_cobblestone",
+        "sound": "stone"
+      },
+      "tags": ["stone"]
+    },
+    "obsidian": {
+      "id": 36,
+      "display_name": "Obsidian",
+      "render_type": "standard",
+      "textures": { "all": "obsidian" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 50.0,
+        "tool": "diamond_pickaxe",
+        "drops": "obsidian",
+        "sound": "stone"
+      },
+      "tags": ["blast_resistant", "stone"]
+    },
+    "sponge": {
+      "id": 37,
+      "display_name": "Sponge",
+      "render_type": "standard",
+      "textures": { "all": "sponge" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 0.6,
+        "tool": "none",
+        "drops": "sponge",
+        "sound": "grass"
+      },
+      "tags": ["utility"]
+    },
+    "stone_bricks": {
+      "id": 38,
+      "display_name": "Stone Bricks",
+      "render_type": "standard",
+      "textures": { "all": "stone_bricks" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 1.5,
+        "tool": "pickaxe",
+        "drops": "stone_bricks",
+        "sound": "stone"
+      },
+      "tags": ["stone", "bricks"]
+    },
+    "bricks": {
+      "id": 39,
+      "display_name": "Bricks",
+      "render_type": "standard",
+      "textures": { "all": "bricks" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 2.0,
+        "tool": "pickaxe",
+        "drops": "bricks",
+        "sound": "stone"
+      },
+      "tags": ["stone", "bricks"]
+    },
+    "cactus": {
+      "id": 40,
+      "display_name": "Cactus",
+      "render_type": "standard",
+      "textures": {
+        "top": "cactus_top",
+        "bottom": "cactus_bottom",
+        "sides": "cactus_side"
+      },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 0.4,
+        "tool": "none",
+        "drops": "cactus",
+        "sound": "cloth"
+      },
+      "tags": ["plant"]
+    },
+    "clay": {
+      "id": 41,
+      "display_name": "Clay",
+      "render_type": "standard",
+      "textures": { "all": "clay" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 0.6,
+        "tool": "shovel",
+        "drops": "clay_ball",
+        "sound": "gravel"
+      },
+      "tags": ["natural"]
+    },
+    "sugar_cane": {
+      "id": 42,
+      "display_name": "Sugar Cane",
+      "render_type": "foliage",
+      "textures": { "all": "sugar_cane" },
+      "properties": {
+        "solid": false,
+        "opaque": false,
+        "hardness": 0.0,
+        "tool": "none",
+        "drops": "sugar_cane",
+        "sound": "grass"
+      },
+      "tags": ["plant", "crop"]
+    },
+    "pumpkin": {
+      "id": 43,
+      "display_name": "Pumpkin",
+      "render_type": "standard",
+      "textures": {
+        "top": "pumpkin_top",
+        "bottom": "pumpkin_top",
+        "sides": "pumpkin_side"
+      },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 1.0,
+        "tool": "axe",
+        "drops": "pumpkin",
+        "sound": "wood"
+      },
+      "tags": ["plant", "crop"]
+    },
+    "jack_o_lantern": {
+      "id": 44,
+      "display_name": "Jack o'Lantern",
+      "render_type": "standard",
+      "textures": {
+        "top": "pumpkin_top",
+        "bottom": "pumpkin_top",
+        "front": "carved_pumpkin",
+        "sides": "pumpkin_side"
+      },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "light_level": 15,
+        "hardness": 1.0,
+        "tool": "axe",
+        "drops": "jack_o_lantern",
+        "sound": "wood"
+      },
+      "tags": ["light_source", "plant"]
+    },
+    "melon": {
+      "id": 45,
+      "display_name": "Melon",
+      "render_type": "standard",
+      "textures": {
+        "top": "melon_top",
+        "bottom": "melon_top",
+        "sides": "melon_side"
+      },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 1.0,
+        "tool": "axe",
+        "drops": "melon_slice",
+        "sound": "wood"
+      },
+      "tags": ["plant", "crop"]
+    },
+    "cake": {
+      "id": 46,
+      "display_name": "Cake",
+      "render_type": "cake",
+      "textures": {
+        "top": "cake_top",
+        "bottom": "cake_bottom",
+        "sides": "cake_side"
+      },
+      "properties": {
+        "solid": true,
+        "opaque": false,
+        "hardness": 0.5,
+        "tool": "none",
+        "drops": "none",
+        "sound": "wool"
+      },
+      "tags": ["food", "interactable"]
+    },
+    "ice": {
+      "id": 47,
+      "display_name": "Ice",
+      "render_type": "standard",
+      "textures": { "all": "ice" },
+      "properties": {
+        "solid": true,
+        "opaque": false,
+        "hardness": 0.5,
+        "tool": "pickaxe",
+        "drops": "none",
+        "sound": "glass"
+      },
+      "tags": ["ice", "transparent"]
+    },
+    "spruce_planks": {
+      "id": 48,
+      "display_name": "Spruce Planks",
+      "render_type": "standard",
+      "textures": { "all": "spruce_planks" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 2.0,
+        "tool": "axe",
+        "drops": "spruce_planks",
+        "sound": "wood"
+      },
+      "tags": ["wood", "planks", "flammable"]
+    },
+    "birch_planks": {
+      "id": 49,
+      "display_name": "Birch Planks",
+      "render_type": "standard",
+      "textures": { "all": "birch_planks" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 2.0,
+        "tool": "axe",
+        "drops": "birch_planks",
+        "sound": "wood"
+      },
+      "tags": ["wood", "planks", "flammable"]
+    },
+    "jungle_planks": {
+      "id": 50,
+      "display_name": "Jungle Planks",
+      "render_type": "standard",
+      "textures": { "all": "jungle_planks" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 2.0,
+        "tool": "axe",
+        "drops": "jungle_planks",
+        "sound": "wood"
+      },
+      "tags": ["wood", "planks", "flammable"]
+    },
+    "netherrack": {
+      "id": 51,
+      "display_name": "Netherrack",
+      "render_type": "standard",
+      "textures": { "all": "netherrack" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 0.4,
+        "tool": "pickaxe",
+        "drops": "netherrack",
+        "sound": "stone"
+      },
+      "tags": ["nether"]
+    },
+    "soul_sand": {
+      "id": 52,
+      "display_name": "Soul Sand",
+      "render_type": "standard",
+      "textures": { "all": "soul_sand" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 0.5,
+        "tool": "shovel",
+        "drops": "soul_sand",
+        "sound": "sand"
+      },
+      "tags": ["nether"]
+    },
+    "glowstone": {
+      "id": 53,
+      "display_name": "Glowstone",
+      "render_type": "standard",
+      "textures": { "all": "glowstone" },
+      "properties": {
+        "solid": true,
+        "opaque": false,
+        "light_level": 15,
+        "hardness": 0.3,
+        "tool": "none",
+        "drops": "glowstone_dust",
+        "sound": "glass"
+      },
+      "tags": ["light_source", "nether"]
+    },
+    "nether_bricks": {
+      "id": 54,
+      "display_name": "Nether Bricks",
+      "render_type": "standard",
+      "textures": { "all": "nether_bricks" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 2.0,
+        "tool": "pickaxe",
+        "drops": "nether_bricks",
+        "sound": "stone"
+      },
+      "tags": ["nether", "bricks"]
+    },
+    "bed": {
+      "id": 55,
+      "display_name": "Red Bed",
+      "render_type": "bed",
+      "textures": {
+        "top": "bed_head_top",
+        "bottom": "oak_planks",
+        "sides": "bed_side"
+      },
+      "properties": {
+        "solid": true,
+        "opaque": false,
+        "hardness": 0.2,
+        "tool": "none",
+        "drops": "bed",
+        "sound": "wood"
+      },
+      "tags": ["furniture", "interactable"]
+    },
+    "oak_door": {
+      "id": 56,
+      "display_name": "Oak Door",
+      "render_type": "door",
+      "textures": {
+        "upper": "oak_door_top",
+        "lower": "oak_door_bottom"
+      },
+      "properties": {
+        "solid": true,
+        "opaque": false,
+        "hardness": 3.0,
+        "tool": "axe",
+        "drops": "oak_door",
+        "sound": "wood"
+      },
+      "tags": ["door", "interactable"]
+    },
+    "iron_door": {
+      "id": 57,
+      "display_name": "Iron Door",
+      "render_type": "door",
+      "textures": {
+        "upper": "iron_door_top",
+        "lower": "iron_door_bottom"
+      },
+      "properties": {
+        "solid": true,
+        "opaque": false,
+        "hardness": 5.0,
+        "tool": "pickaxe",
+        "drops": "iron_door",
+        "sound": "metal"
+      },
+      "tags": ["door", "metal"]
+    },
+    "sandstone": {
+      "id": 58,
+      "display_name": "Sandstone",
+      "render_type": "standard",
+      "textures": {
+        "top": "sandstone_top",
+        "bottom": "sandstone_bottom",
+        "sides": "sandstone"
+      },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 0.8,
+        "tool": "pickaxe",
+        "drops": "sandstone",
+        "sound": "stone"
+      },
+      "tags": ["stone"]
+    },
+    "white_wool": {
+      "id": 59,
+      "display_name": "White Wool",
+      "render_type": "standard",
+      "textures": { "all": "white_wool" },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 0.8,
+        "tool": "shears",
+        "drops": "white_wool",
+        "sound": "cloth"
+      },
+      "tags": ["wool", "flammable"]
+    },
+    "spruce_log": {
+      "id": 99,
+      "display_name": "Spruce Log",
+      "render_type": "standard",
+      "textures": { "top": "spruce_log_top", "bottom": "spruce_log_top", "sides": "spruce_log" },
+      "properties": { "solid": true, "opaque": true, "hardness": 2.0, "tool": "axe", "drops": "spruce_log", "sound": "wood" },
+      "tags": ["wood", "log", "flammable"]
+    },
+    "birch_log": {
+      "id": 100,
+      "display_name": "Birch Log",
+      "render_type": "standard",
+      "textures": { "top": "birch_log_top", "bottom": "birch_log_top", "sides": "birch_log" },
+      "properties": { "solid": true, "opaque": true, "hardness": 2.0, "tool": "axe", "drops": "birch_log", "sound": "wood" },
+      "tags": ["wood", "log", "flammable"]
+    },
+    "jungle_log": {
+      "id": 101,
+      "display_name": "Jungle Log",
+      "render_type": "standard",
+      "textures": { "top": "jungle_log_top", "bottom": "jungle_log_top", "sides": "jungle_log" },
+      "properties": { "solid": true, "opaque": true, "hardness": 2.0, "tool": "axe", "drops": "jungle_log", "sound": "wood" },
+      "tags": ["wood", "log", "flammable"]
+    },
+    "dark_oak_log": {
+      "id": 102,
+      "display_name": "Dark Oak Log",
+      "render_type": "standard",
+      "textures": { "top": "dark_oak_log_top", "bottom": "dark_oak_log_top", "sides": "dark_oak_log" },
+      "properties": { "solid": true, "opaque": true, "hardness": 2.0, "tool": "axe", "drops": "dark_oak_log", "sound": "wood" },
+      "tags": ["wood", "log", "flammable"]
+    },
+    "acacia_log": {
+      "id": 103,
+      "display_name": "Acacia Log",
+      "render_type": "standard",
+      "textures": { "top": "acacia_log_top", "bottom": "acacia_log_top", "sides": "acacia_log" },
+      "properties": { "solid": true, "opaque": true, "hardness": 2.0, "tool": "axe", "drops": "acacia_log", "sound": "wood" },
+      "tags": ["wood", "log", "flammable"]
+    },
+    "dark_oak_planks": {
+      "id": 104,
+      "display_name": "Dark Oak Planks",
+      "render_type": "standard",
+      "textures": { "all": "dark_oak_planks" },
+      "properties": { "solid": true, "opaque": true, "hardness": 2.0, "tool": "axe", "drops": "dark_oak_planks", "sound": "wood" },
+      "tags": ["wood", "planks", "flammable"]
+    },
+    "acacia_planks": {
+      "id": 105,
+      "display_name": "Acacia Planks",
+      "render_type": "standard",
+      "textures": { "all": "acacia_planks" },
+      "properties": { "solid": true, "opaque": true, "hardness": 2.0, "tool": "axe", "drops": "acacia_planks", "sound": "wood" },
+      "tags": ["wood", "planks", "flammable"]
+    },
+    "spruce_leaves": {
+      "id": 106,
+      "display_name": "Spruce Leaves",
+      "render_type": "standard",
+      "textures": { "all": "spruce_leaves" },
+      "properties": { "solid": true, "opaque": false, "hardness": 0.2, "tool": "shears", "drops": "spruce_sapling", "sound": "grass" },
+      "tags": ["leaves", "foliage", "flammable"]
+    },
+    "birch_leaves": {
+      "id": 107,
+      "display_name": "Birch Leaves",
+      "render_type": "standard",
+      "textures": { "all": "birch_leaves" },
+      "properties": { "solid": true, "opaque": false, "hardness": 0.2, "tool": "shears", "drops": "birch_sapling", "sound": "grass" },
+      "tags": ["leaves", "foliage", "flammable"]
+    },
+    "jungle_leaves": {
+      "id": 108,
+      "display_name": "Jungle Leaves",
+      "render_type": "standard",
+      "textures": { "all": "jungle_leaves" },
+      "properties": { "solid": true, "opaque": false, "hardness": 0.2, "tool": "shears", "drops": "jungle_sapling", "sound": "grass" },
+      "tags": ["leaves", "foliage", "flammable"]
+    },
+    "dark_oak_leaves": {
+      "id": 109,
+      "display_name": "Dark Oak Leaves",
+      "render_type": "standard",
+      "textures": { "all": "dark_oak_leaves" },
+      "properties": { "solid": true, "opaque": false, "hardness": 0.2, "tool": "shears", "drops": "dark_oak_sapling", "sound": "grass" },
+      "tags": ["leaves", "foliage", "flammable"]
+    },
+    "acacia_leaves": {
+      "id": 110,
+      "display_name": "Acacia Leaves",
+      "render_type": "standard",
+      "textures": { "all": "acacia_leaves" },
+      "properties": { "solid": true, "opaque": false, "hardness": 0.2, "tool": "shears", "drops": "acacia_sapling", "sound": "grass" },
+      "tags": ["leaves", "foliage", "flammable"]
+    },
+    "oak_sapling": {
+      "id": 111,
+      "display_name": "Oak Sapling",
+      "render_type": "foliage",
+      "textures": { "all": "oak_sapling" },
+      "properties": { "solid": false, "opaque": false, "hardness": 0.0, "tool": "none", "drops": "oak_sapling", "sound": "grass" },
+      "tags": ["sapling", "foliage"]
+    },
+    "spruce_sapling": {
+      "id": 112,
+      "display_name": "Spruce Sapling",
+      "render_type": "foliage",
+      "textures": { "all": "spruce_sapling" },
+      "properties": { "solid": false, "opaque": false, "hardness": 0.0, "tool": "none", "drops": "spruce_sapling", "sound": "grass" },
+      "tags": ["sapling", "foliage"]
+    },
+    "birch_sapling": {
+      "id": 113,
+      "display_name": "Birch Sapling",
+      "render_type": "foliage",
+      "textures": { "all": "birch_sapling" },
+      "properties": { "solid": false, "opaque": false, "hardness": 0.0, "tool": "none", "drops": "birch_sapling", "sound": "grass" },
+      "tags": ["sapling", "foliage"]
+    },
+    "jungle_sapling": {
+      "id": 114,
+      "display_name": "Jungle Sapling",
+      "render_type": "foliage",
+      "textures": { "all": "jungle_sapling" },
+      "properties": { "solid": false, "opaque": false, "hardness": 0.0, "tool": "none", "drops": "jungle_sapling", "sound": "grass" },
+      "tags": ["sapling", "foliage"]
+    },
+    "dark_oak_sapling": {
+      "id": 115,
+      "display_name": "Dark Oak Sapling",
+      "render_type": "foliage",
+      "textures": { "all": "dark_oak_sapling" },
+      "properties": { "solid": false, "opaque": false, "hardness": 0.0, "tool": "none", "drops": "dark_oak_sapling", "sound": "grass" },
+      "tags": ["sapling", "foliage"]
+    },
+    "acacia_sapling": {
+      "id": 116,
+      "display_name": "Acacia Sapling",
+      "render_type": "foliage",
+      "textures": { "all": "acacia_sapling" },
+      "properties": { "solid": false, "opaque": false, "hardness": 0.0, "tool": "none", "drops": "acacia_sapling", "sound": "grass" },
+      "tags": ["sapling", "foliage"]
+    },
+    "oak_trapdoor": {
+      "id": 117,
+      "display_name": "Oak Trapdoor",
+      "render_type": "trapdoor",
+      "textures": { "all": "oak_trapdoor" },
+      "properties": { "solid": true, "opaque": false, "hardness": 3.0, "tool": "axe", "drops": "oak_trapdoor", "sound": "wood" },
+      "tags": ["trapdoor", "interactable"]
+    },
+    "spruce_trapdoor": {
+      "id": 118,
+      "display_name": "Spruce Trapdoor",
+      "render_type": "trapdoor",
+      "textures": { "all": "spruce_trapdoor" },
+      "properties": { "solid": true, "opaque": false, "hardness": 3.0, "tool": "axe", "drops": "spruce_trapdoor", "sound": "wood" },
+      "tags": ["trapdoor", "interactable"]
+    },
+    "birch_trapdoor": {
+      "id": 119,
+      "display_name": "Birch Trapdoor",
+      "render_type": "trapdoor",
+      "textures": { "all": "birch_trapdoor" },
+      "properties": { "solid": true, "opaque": false, "hardness": 3.0, "tool": "axe", "drops": "birch_trapdoor", "sound": "wood" },
+      "tags": ["trapdoor", "interactable"]
+    },
+    "jungle_trapdoor": {
+      "id": 120,
+      "display_name": "Jungle Trapdoor",
+      "render_type": "trapdoor",
+      "textures": { "all": "jungle_trapdoor" },
+      "properties": { "solid": true, "opaque": false, "hardness": 3.0, "tool": "axe", "drops": "jungle_trapdoor", "sound": "wood" },
+      "tags": ["trapdoor", "interactable"]
+    },
+    "dark_oak_trapdoor": {
+      "id": 121,
+      "display_name": "Dark Oak Trapdoor",
+      "render_type": "trapdoor",
+      "textures": { "all": "dark_oak_trapdoor" },
+      "properties": { "solid": true, "opaque": false, "hardness": 3.0, "tool": "axe", "drops": "dark_oak_trapdoor", "sound": "wood" },
+      "tags": ["trapdoor", "interactable"]
+    },
+    "acacia_trapdoor": {
+      "id": 122,
+      "display_name": "Acacia Trapdoor",
+      "render_type": "trapdoor",
+      "textures": { "all": "acacia_trapdoor" },
+      "properties": { "solid": true, "opaque": false, "hardness": 3.0, "tool": "axe", "drops": "acacia_trapdoor", "sound": "wood" },
+      "tags": ["trapdoor", "interactable"]
+    },
+    "iron_trapdoor": {
+      "id": 123,
+      "display_name": "Iron Trapdoor",
+      "render_type": "trapdoor",
+      "textures": { "all": "iron_trapdoor" },
+      "properties": { "solid": true, "opaque": false, "hardness": 5.0, "tool": "pickaxe", "drops": "iron_trapdoor", "sound": "metal" },
+      "tags": ["trapdoor", "interactable", "metal"]
+    },
+    "spruce_door": {
+      "id": 124,
+      "display_name": "Spruce Door",
+      "render_type": "door",
+      "textures": { "upper": "spruce_door_top", "lower": "spruce_door_bottom" },
+      "properties": { "solid": true, "opaque": false, "hardness": 3.0, "tool": "axe", "drops": "spruce_door", "sound": "wood" },
+      "tags": ["door", "interactable"]
+    },
+    "birch_door": {
+      "id": 125,
+      "display_name": "Birch Door",
+      "render_type": "door",
+      "textures": { "upper": "birch_door_top", "lower": "birch_door_bottom" },
+      "properties": { "solid": true, "opaque": false, "hardness": 3.0, "tool": "axe", "drops": "birch_door", "sound": "wood" },
+      "tags": ["door", "interactable"]
+    },
+    "jungle_door": {
+      "id": 126,
+      "display_name": "Jungle Door",
+      "render_type": "door",
+      "textures": { "upper": "jungle_door_top", "lower": "jungle_door_bottom" },
+      "properties": { "solid": true, "opaque": false, "hardness": 3.0, "tool": "axe", "drops": "jungle_door", "sound": "wood" },
+      "tags": ["door", "interactable"]
+    },
+    "dark_oak_door": {
+      "id": 127,
+      "display_name": "Dark Oak Door",
+      "render_type": "door",
+      "textures": { "upper": "dark_oak_door_top", "lower": "dark_oak_door_bottom" },
+      "properties": { "solid": true, "opaque": false, "hardness": 3.0, "tool": "axe", "drops": "dark_oak_door", "sound": "wood" },
+      "tags": ["door", "interactable"]
+    },
+    "acacia_door": {
+      "id": 128,
+      "display_name": "Acacia Door",
+      "render_type": "door",
+      "textures": { "upper": "acacia_door_top", "lower": "acacia_door_bottom" },
+      "properties": { "solid": true, "opaque": false, "hardness": 3.0, "tool": "axe", "drops": "acacia_door", "sound": "wood" },
+      "tags": ["door", "interactable"]
+    },
+    "andesite": {
+      "id": 129,
+      "display_name": "Andesite",
+      "render_type": "standard",
+      "textures": { "all": "andesite" },
+      "properties": { "solid": true, "opaque": true, "hardness": 1.5, "tool": "pickaxe", "drops": "andesite", "sound": "stone" },
+      "tags": ["stone"]
+    },
+    "diorite": {
+      "id": 130,
+      "display_name": "Diorite",
+      "render_type": "standard",
+      "textures": { "all": "diorite" },
+      "properties": { "solid": true, "opaque": true, "hardness": 1.5, "tool": "pickaxe", "drops": "diorite", "sound": "stone" },
+      "tags": ["stone"]
+    },
+    "granite": {
+      "id": 131,
+      "display_name": "Granite",
+      "render_type": "standard",
+      "textures": { "all": "granite" },
+      "properties": { "solid": true, "opaque": true, "hardness": 1.5, "tool": "pickaxe", "drops": "granite", "sound": "stone" },
+      "tags": ["stone"]
+    },
+    "polished_andesite": {
+      "id": 132,
+      "display_name": "Polished Andesite",
+      "render_type": "standard",
+      "textures": { "all": "polished_andesite" },
+      "properties": { "solid": true, "opaque": true, "hardness": 1.5, "tool": "pickaxe", "drops": "polished_andesite", "sound": "stone" },
+      "tags": ["stone"]
+    },
+    "polished_diorite": {
+      "id": 133,
+      "display_name": "Polished Diorite",
+      "render_type": "standard",
+      "textures": { "all": "polished_diorite" },
+      "properties": { "solid": true, "opaque": true, "hardness": 1.5, "tool": "pickaxe", "drops": "polished_diorite", "sound": "stone" },
+      "tags": ["stone"]
+    },
+    "polished_granite": {
+      "id": 134,
+      "display_name": "Polished Granite",
+      "render_type": "standard",
+      "textures": { "all": "polished_granite" },
+      "properties": { "solid": true, "opaque": true, "hardness": 1.5, "tool": "pickaxe", "drops": "polished_granite", "sound": "stone" },
+      "tags": ["stone"]
+    },
+    "coarse_dirt": {
+      "id": 135,
+      "display_name": "Coarse Dirt",
+      "render_type": "standard",
+      "textures": { "all": "coarse_dirt" },
+      "properties": { "solid": true, "opaque": true, "hardness": 0.5, "tool": "shovel", "drops": "coarse_dirt", "sound": "gravel" },
+      "tags": ["dirt", "terrain"]
+    },
+    "terracotta": {
+      "id": 136,
+      "display_name": "Terracotta",
+      "render_type": "standard",
+      "textures": { "all": "terracotta" },
+      "properties": { "solid": true, "opaque": true, "hardness": 1.25, "tool": "pickaxe", "drops": "terracotta", "sound": "stone" },
+      "tags": ["stone", "clay"]
+    },
+    "smooth_sandstone": {
+      "id": 137,
+      "display_name": "Smooth Sandstone",
+      "render_type": "standard",
+      "textures": { "all": "sandstone_top" },
+      "properties": { "solid": true, "opaque": true, "hardness": 0.8, "tool": "pickaxe", "drops": "smooth_sandstone", "sound": "stone" },
+      "tags": ["stone"]
+    },
+    "tuff": {
+      "id": 138,
+      "display_name": "Tuff",
+      "render_type": "standard",
+      "textures": { "all": "tuff" },
+      "properties": { "solid": true, "opaque": true, "hardness": 1.5, "tool": "pickaxe", "drops": "tuff", "sound": "stone" },
+      "tags": ["stone"]
+    },
+    "calcite": {
+      "id": 139,
+      "display_name": "Calcite",
+      "render_type": "standard",
+      "textures": { "all": "calcite" },
+      "properties": { "solid": true, "opaque": true, "hardness": 0.75, "tool": "pickaxe", "drops": "calcite", "sound": "stone" },
+      "tags": ["stone"]
+    },
+    "deepslate": {
+      "id": 140,
+      "display_name": "Deepslate",
+      "render_type": "standard",
+      "textures": { "top": "deepslate_top", "bottom": "deepslate_top", "sides": "deepslate" },
+      "properties": { "solid": true, "opaque": true, "hardness": 3.0, "tool": "pickaxe", "drops": "cobbled_deepslate", "sound": "stone" },
+      "tags": ["stone", "deepslate"]
+    },
+    "cobbled_deepslate": {
+      "id": 141,
+      "display_name": "Cobbled Deepslate",
+      "render_type": "standard",
+      "textures": { "all": "cobbled_deepslate" },
+      "properties": { "solid": true, "opaque": true, "hardness": 3.5, "tool": "pickaxe", "drops": "cobbled_deepslate", "sound": "stone" },
+      "tags": ["stone", "deepslate"]
+    },
+    "deepslate_bricks": {
+      "id": 142,
+      "display_name": "Deepslate Bricks",
+      "render_type": "standard",
+      "textures": { "all": "deepslate_bricks" },
+      "properties": { "solid": true, "opaque": true, "hardness": 3.5, "tool": "pickaxe", "drops": "deepslate_bricks", "sound": "stone" },
+      "tags": ["stone", "deepslate", "bricks"]
+    },
+    "deepslate_tiles": {
+      "id": 143,
+      "display_name": "Deepslate Tiles",
+      "render_type": "standard",
+      "textures": { "all": "deepslate_tiles" },
+      "properties": { "solid": true, "opaque": true, "hardness": 3.5, "tool": "pickaxe", "drops": "deepslate_tiles", "sound": "stone" },
+      "tags": ["stone", "deepslate"]
+    },
+    "mud_bricks": {
+      "id": 144,
+      "display_name": "Mud Bricks",
+      "render_type": "standard",
+      "textures": { "all": "mud_bricks" },
+      "properties": { "solid": true, "opaque": true, "hardness": 1.5, "tool": "pickaxe", "drops": "mud_bricks", "sound": "stone" },
+      "tags": ["stone", "bricks"]
+    },
+    "copper_ore": {
+      "id": 176,
+      "display_name": "Copper Ore",
+      "render_type": "standard",
+      "textures": { "all": "copper_ore" },
+      "properties": { "solid": true, "opaque": true, "hardness": 3.0, "tool": "pickaxe", "drops": "raw_copper", "sound": "stone" },
+      "tags": ["ore", "stone"]
+    },
+    "copper_block": {
+      "id": 177,
+      "display_name": "Block of Copper",
+      "render_type": "standard",
+      "textures": { "all": "copper_block" },
+      "properties": { "solid": true, "opaque": true, "hardness": 3.0, "tool": "pickaxe", "drops": "copper_block", "sound": "metal" },
+      "tags": ["metal", "mineral"]
+    },
+    "lapis_ore": {
+      "id": 178,
+      "display_name": "Lapis Lazuli Ore",
+      "render_type": "standard",
+      "textures": { "all": "lapis_ore" },
+      "properties": { "solid": true, "opaque": true, "hardness": 3.0, "tool": "pickaxe", "drops": "lapis_lazuli", "sound": "stone" },
+      "tags": ["ore", "stone"]
+    },
+    "lapis_block": {
+      "id": 179,
+      "display_name": "Block of Lapis Lazuli",
+      "render_type": "standard",
+      "textures": { "all": "lapis_block" },
+      "properties": { "solid": true, "opaque": true, "hardness": 3.0, "tool": "pickaxe", "drops": "lapis_block", "sound": "stone" },
+      "tags": ["mineral"]
+    },
+    "deepslate_coal_ore": {
+      "id": 180,
+      "display_name": "Deepslate Coal Ore",
+      "render_type": "standard",
+      "textures": { "all": "deepslate_coal_ore" },
+      "properties": { "solid": true, "opaque": true, "hardness": 4.5, "tool": "pickaxe", "drops": "coal", "sound": "stone" },
+      "tags": ["ore", "deepslate"]
+    },
+    "deepslate_iron_ore": {
+      "id": 181,
+      "display_name": "Deepslate Iron Ore",
+      "render_type": "standard",
+      "textures": { "all": "deepslate_iron_ore" },
+      "properties": { "solid": true, "opaque": true, "hardness": 4.5, "tool": "pickaxe", "drops": "raw_iron", "sound": "stone" },
+      "tags": ["ore", "deepslate"]
+    },
+    "deepslate_gold_ore": {
+      "id": 182,
+      "display_name": "Deepslate Gold Ore",
+      "render_type": "standard",
+      "textures": { "all": "deepslate_gold_ore" },
+      "properties": { "solid": true, "opaque": true, "hardness": 4.5, "tool": "pickaxe", "drops": "raw_gold", "sound": "stone" },
+      "tags": ["ore", "deepslate"]
+    },
+    "deepslate_diamond_ore": {
+      "id": 183,
+      "display_name": "Deepslate Diamond Ore",
+      "render_type": "standard",
+      "textures": { "all": "deepslate_diamond_ore" },
+      "properties": { "solid": true, "opaque": true, "hardness": 4.5, "tool": "pickaxe", "drops": "diamond", "sound": "stone" },
+      "tags": ["ore", "deepslate"]
+    },
+    "deepslate_redstone_ore": {
+      "id": 184,
+      "display_name": "Deepslate Redstone Ore",
+      "render_type": "standard",
+      "textures": { "all": "deepslate_redstone_ore" },
+      "properties": { "solid": true, "opaque": true, "hardness": 4.5, "tool": "pickaxe", "drops": "redstone", "sound": "stone" },
+      "tags": ["ore", "deepslate"]
+    },
+    "deepslate_emerald_ore": {
+      "id": 185,
+      "display_name": "Deepslate Emerald Ore",
+      "render_type": "standard",
+      "textures": { "all": "deepslate_emerald_ore" },
+      "properties": { "solid": true, "opaque": true, "hardness": 4.5, "tool": "pickaxe", "drops": "emerald", "sound": "stone" },
+      "tags": ["ore", "deepslate"]
+    },
+    "deepslate_copper_ore": {
+      "id": 186,
+      "display_name": "Deepslate Copper Ore",
+      "render_type": "standard",
+      "textures": { "all": "deepslate_copper_ore" },
+      "properties": { "solid": true, "opaque": true, "hardness": 4.5, "tool": "pickaxe", "drops": "raw_copper", "sound": "stone" },
+      "tags": ["ore", "deepslate"]
+    },
+    "soul_torch": {
+      "id": 187,
+      "display_name": "Soul Torch",
+      "render_type": "torch",
+      "textures": { "all": "soul_torch" },
+      "properties": { "solid": false, "opaque": false, "light_level": 10, "hardness": 0.0, "tool": "none", "drops": "soul_torch", "sound": "wood" },
+      "tags": ["light_source", "attachable"]
+    },
+    "redstone_torch": {
+      "id": 188,
+      "display_name": "Redstone Torch",
+      "render_type": "torch",
+      "textures": { "all": "redstone_torch" },
+      "properties": { "solid": false, "opaque": false, "light_level": 7, "hardness": 0.0, "tool": "none", "drops": "redstone_torch", "sound": "wood" },
+      "tags": ["light_source", "attachable", "redstone"]
+    },
+    "soul_lantern": {
+      "id": 189,
+      "display_name": "Soul Lantern",
+      "render_type": "lantern",
+      "textures": { "all": "soul_lantern" },
+      "properties": { "solid": false, "opaque": false, "light_level": 10, "hardness": 3.5, "tool": "pickaxe", "drops": "soul_lantern", "sound": "lantern" },
+      "tags": ["light_source", "emissive", "hangable"]
+    },
+    "barrel": {
+      "id": 190,
+      "display_name": "Barrel",
+      "render_type": "standard",
+      "textures": { "top": "barrel_top", "bottom": "barrel_bottom", "sides": "barrel_side" },
+      "properties": { "solid": true, "opaque": true, "hardness": 2.5, "tool": "axe", "drops": "barrel", "sound": "wood" },
+      "tags": ["wood", "container"]
+    },
+    "smoker": {
+      "id": 191,
+      "display_name": "Smoker",
+      "render_type": "standard",
+      "textures": { "top": "smoker_top", "bottom": "stone", "front": "smoker_front", "sides": "smoker_side" },
+      "properties": { "solid": true, "opaque": true, "hardness": 3.5, "tool": "pickaxe", "drops": "smoker", "sound": "stone" },
+      "tags": ["workstation"]
+    },
+    "blast_furnace": {
+      "id": 192,
+      "display_name": "Blast Furnace",
+      "render_type": "standard",
+      "textures": { "top": "blast_furnace_top", "bottom": "stone", "front": "blast_furnace_front", "sides": "blast_furnace_side" },
+      "properties": { "solid": true, "opaque": true, "hardness": 3.5, "tool": "pickaxe", "drops": "blast_furnace", "sound": "stone" },
+      "tags": ["workstation"]
+    },
+    "tnt": {
+      "id": 193,
+      "display_name": "TNT",
+      "render_type": "standard",
+      "textures": {
+        "top": "tnt_top",
+        "bottom": "tnt_bottom",
+        "sides": "tnt_side"
+      },
+      "properties": {
+        "solid": true,
+        "opaque": true,
+        "hardness": 0.0,
+        "tool": "none",
+        "drops": "tnt",
+        "sound": "grass"
+      },
+      "tags": ["explosive", "utility"]
+    }
+  }
+}
+

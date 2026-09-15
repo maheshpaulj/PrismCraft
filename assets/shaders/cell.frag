@@ -341,6 +341,14 @@ void main() {
         discard;
     }
 
+    int settingsFlags = int(pc.shaderOptions.w + 0.5);
+
+    // Multiplicative crack overlay pass: output raw texture RGB to multiply directly with destination
+    if ((settingsFlags & 64) != 0) {
+        outColor = vec4(texSample.rgb, 1.0);
+        return;
+    }
+
     // Convert authored sRGB texture albedo into true physical linear reflectance
     vec3 albedo = srgbToLinear(texSample.rgb);
 
@@ -349,7 +357,6 @@ void main() {
     int optShadowQuality = int(pc.shaderOptions.x + 0.5);
     int optWaterQuality = int(pc.shaderOptions.y + 0.5);
     int optColorGrading = int(pc.shaderOptions.z + 0.5);
-    int settingsFlags = int(pc.shaderOptions.w + 0.5);
     bool optPlayerShadow = (settingsFlags & 1) != 0;
     bool optClouds = (settingsFlags & 2) != 0;
     bool optCloudShadows = (settingsFlags & 4) != 0;
@@ -408,7 +415,7 @@ void main() {
     vec3 celestialLightColor = mix(moonColor, sunColor, isDay) * directFactor;
 
     // 3. Foliage Translucency / Backlight (Subsurface transmission through leaves and grass)
-    bool isFoliage = (texSample.g > texSample.r * 1.05 && texSample.g > texSample.b * 1.02) || (texSample.a < 0.95);
+    bool isFoliage = (length(fragNormal) > 1.2) || (texSample.a < 0.95);
     vec3 foliageGlow = vec3(0.0);
     if (vibrant && isFoliage) {
         // Natural canopy hue and value variation per world chunk/tree position

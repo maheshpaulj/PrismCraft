@@ -5,6 +5,8 @@
 #include "rhi/CommandQueue.hpp"
 #include "player/Player.hpp"
 #include "world/ChunkMesher.hpp"
+#include "world/Biome.hpp"
+#include "world/TerrainGen.hpp"
 #include "renderer/TextureAtlas.hpp"
 #include "ui/FontData.hpp"
 #include <glm/gtc/matrix_transform.hpp>
@@ -91,7 +93,8 @@ void UIRenderer::updateDynamicUI(uint32_t f,
                                  const Player& player, uint32_t screenWidth, uint32_t screenHeight, float fps,
                                  const GameOptions& options, const World* world,
                                  bool isChatOpen, const std::string& chatInput,
-                                 const std::string& feedbackMsg, float feedbackTimer) {
+                                 const std::string& feedbackMsg, float feedbackTimer,
+                                 float sleepFadeAlpha) {
     std::vector<ChunkVertex> vertices;
     std::vector<uint32_t> indices;
 
@@ -184,26 +187,46 @@ void UIRenderer::updateDynamicUI(uint32_t f,
         FontRenderer::drawText(vertices, indices, l6, hudX, hudY + lineH * 5.0f, fontSize, lightCol, true);
 
         // Line 7: Biome
-        const char* biomeStr = "Plains";
-        if (pos.y > 76.0f) biomeStr = "Mountain Peaks";
-        else if (pos.y > 54.0f) biomeStr = "Rolling Hills";
-        else if (pos.y <= 45.0f) biomeStr = "Coastal Beach";
+        std::string_view biomeSv = "Plains";
+        if (world) {
+            BiomeType bType = world->getTerrainGen().getBiome(curCell.x, curCell.z);
+            biomeSv = getBiomeName(bType);
+        }
         char l7[128];
-        std::snprintf(l7, sizeof(l7), "Biome: %s", biomeStr);
+        std::snprintf(l7, sizeof(l7), "Biome: %.*s", static_cast<int>(biomeSv.size()), biomeSv.data());
         FontRenderer::drawText(vertices, indices, l7, hudX, hudY + lineH * 6.0f, fontSize, glm::vec3(0.95f, 0.85f, 0.40f), true);
     } else {
-        float fontSize = 15.0f;
-        char fpsBuf[64];
-        std::snprintf(fpsBuf, sizeof(fpsBuf), "FPS: %d", static_cast<int>(fps));
-        FontRenderer::drawText(vertices, indices, fpsBuf, hudX, hudY, fontSize, glm::vec3(1.0f, 1.0f, 0.35f), true);
+        float fontSize = 14.5f;
+        float curY = hudY;
 
-        char posBuf[128];
-        std::snprintf(posBuf, sizeof(posBuf), "XYZ: %.1f / %.1f / %.1f", pos.x, pos.y, pos.z);
-        FontRenderer::drawText(vertices, indices, posBuf, hudX, hudY + 18.0f, fontSize, glm::vec3(1.0f, 1.0f, 1.0f), true);
+        if (options.showFPS) {
+            char fpsBuf[64];
+            std::snprintf(fpsBuf, sizeof(fpsBuf), "FPS: %d", static_cast<int>(fps));
+            FontRenderer::drawText(vertices, indices, fpsBuf, hudX, curY, fontSize, glm::vec3(1.0f, 1.0f, 0.35f), true);
+            curY += 18.0f;
+        }
 
-        char selBuf[128];
-        std::snprintf(selBuf, sizeof(selBuf), "Block: %s", bName.empty() ? "Air" : bName.c_str());
-        FontRenderer::drawText(vertices, indices, selBuf, hudX, hudY + 36.0f, fontSize, glm::vec3(0.40f, 1.0f, 0.40f), true);
+        if (options.showXYZ) {
+            char posBuf[128];
+            std::snprintf(posBuf, sizeof(posBuf), "XYZ: %.1f / %.1f / %.1f", pos.x, pos.y, pos.z);
+            FontRenderer::drawText(vertices, indices, posBuf, hudX, curY, fontSize, glm::vec3(1.0f, 1.0f, 1.0f), true);
+            curY += 18.0f;
+
+            if (world) {
+                BiomeType bType = world->getTerrainGen().getBiome(curCell.x, curCell.z);
+                std::string_view bNameSv = getBiomeName(bType);
+                char bioBuf[64];
+                std::snprintf(bioBuf, sizeof(bioBuf), "Biome: %.*s", static_cast<int>(bNameSv.size()), bNameSv.data());
+                FontRenderer::drawText(vertices, indices, bioBuf, hudX, curY, fontSize, glm::vec3(0.95f, 0.85f, 0.40f), true);
+                curY += 18.0f;
+            }
+        }
+
+        if (options.showFPS || options.showXYZ) {
+            char selBuf[128];
+            std::snprintf(selBuf, sizeof(selBuf), "Block: %s", bName.empty() ? "Air" : bName.c_str());
+            FontRenderer::drawText(vertices, indices, selBuf, hudX, curY, fontSize, glm::vec3(0.40f, 1.0f, 0.40f), true);
+        }
     }
 
     auto addThickLine = [&](const glm::vec3& p0, const glm::vec3& p1, float thickness, const glm::vec3& color) {
@@ -232,81 +255,83 @@ void UIRenderer::updateDynamicUI(uint32_t f,
     float startX = (screenWidth - totalHotbarW) * 0.5f;
     float startY = screenHeight - triHeight - 16.0f;
 
-    // Health & Hunger & Oxygen & Armor Bars above Hotbar
-    float iconW = 12.0f;
-    float iconStep = 13.0f;
-    float statusY = startY - 20.0f;
+    // Health & Hunger & Oxygen & Armor Bars above Hotbar (Survival only)
+    if (!player.isCreative()) {
+        float iconW = 12.0f;
+        float iconStep = 13.0f;
+        float statusY = startY - 20.0f;
 
-    // 1. Health Bar (10 Minecraft hearts on the left)
-    float health = player.getHealth();
-    for (int i = 0; i < 10; ++i) {
-        float hx = startX + i * iconStep;
-        float hy = statusY;
-        if (health <= 4.0f) {
-            hy += (i % 2 == 0) ? 1.5f : -1.5f; // Low health jitter
-        }
-        // Background empty container
-        glm::vec4 uvEmpty = TextureAtlas::getTileUV(TextureAtlas::TILE_HEART_EMPTY);
-        addTexturedQuad(hx, hy, iconW, iconW, uvEmpty, glm::vec3(1.0f));
-
-        if (health >= (i + 1) * 2.0f) {
-            glm::vec4 uvFull = TextureAtlas::getTileUV(TextureAtlas::TILE_HEART_FULL);
-            addTexturedQuad(hx, hy, iconW, iconW, uvFull, glm::vec3(1.0f));
-        } else if (health >= i * 2.0f + 1.0f) {
-            glm::vec4 uvHalf = TextureAtlas::getTileUV(TextureAtlas::TILE_HEART_HALF);
-            addTexturedQuad(hx, hy, iconW, iconW, uvHalf, glm::vec3(1.0f));
-        }
-    }
-
-    // 2. Hunger Bar (10 Minecraft hunger shanks on the right)
-    float hunger = player.getHunger();
-    float hungerStartX = startX + totalHotbarW - 10.0f * iconStep;
-    for (int i = 0; i < 10; ++i) {
-        float hx = hungerStartX + (9 - i) * iconStep;
-        float hy = statusY;
-        // Background empty drumstick
-        glm::vec4 uvEmpty = TextureAtlas::getTileUV(TextureAtlas::TILE_HUNGER_EMPTY);
-        addTexturedQuad(hx, hy, iconW, iconW, uvEmpty, glm::vec3(1.0f));
-
-        if (hunger >= (i + 1) * 2.0f) {
-            glm::vec4 uvFull = TextureAtlas::getTileUV(TextureAtlas::TILE_HUNGER_FULL);
-            addTexturedQuad(hx, hy, iconW, iconW, uvFull, glm::vec3(1.0f));
-        } else if (hunger >= i * 2.0f + 1.0f) {
-            glm::vec4 uvHalf = TextureAtlas::getTileUV(TextureAtlas::TILE_HUNGER_HALF);
-            addTexturedQuad(hx, hy, iconW, iconW, uvHalf, glm::vec3(1.0f));
-        }
-    }
-
-    // 3. Oxygen Bar (10 Bubbles above Hunger Bar when underwater)
-    float oxygen = player.getOxygen();
-    if (player.isUnderwater() || oxygen < 10.0f) {
-        float bubbleY = statusY - 14.0f;
+        // 1. Health Bar (10 Minecraft hearts on the left)
+        float health = player.getHealth();
         for (int i = 0; i < 10; ++i) {
-            float bx = hungerStartX + (9 - i) * iconStep;
-            float by = bubbleY;
-            if (oxygen >= (i + 1) * 1.0f) {
-                glm::vec4 uvBubble = TextureAtlas::getTileUV(TextureAtlas::TILE_BUBBLE);
-                addTexturedQuad(bx, by, iconW, iconW, uvBubble, glm::vec3(1.0f));
-            } else if (oxygen >= i * 1.0f + 0.5f) {
-                glm::vec4 uvPop = TextureAtlas::getTileUV(TextureAtlas::TILE_BUBBLE_POP);
-                addTexturedQuad(bx, by, iconW, iconW, uvPop, glm::vec3(1.0f));
+            float hx = startX + i * iconStep;
+            float hy = statusY;
+            if (health <= 4.0f) {
+                hy += (i % 2 == 0) ? 1.5f : -1.5f; // Low health jitter
+            }
+            // Background empty container
+            glm::vec4 uvEmpty = TextureAtlas::getTileUV(TextureAtlas::TILE_HEART_EMPTY);
+            addTexturedQuad(hx, hy, iconW, iconW, uvEmpty, glm::vec3(1.0f));
+
+            if (health >= (i + 1) * 2.0f) {
+                glm::vec4 uvFull = TextureAtlas::getTileUV(TextureAtlas::TILE_HEART_FULL);
+                addTexturedQuad(hx, hy, iconW, iconW, uvFull, glm::vec3(1.0f));
+            } else if (health >= i * 2.0f + 1.0f) {
+                glm::vec4 uvHalf = TextureAtlas::getTileUV(TextureAtlas::TILE_HEART_HALF);
+                addTexturedQuad(hx, hy, iconW, iconW, uvHalf, glm::vec3(1.0f));
             }
         }
-    }
 
-    // 4. Armor Bar (above Health Bar when armor > 0)
-    float armor = player.getArmor();
-    if (armor > 0.0f) {
-        float armorY = statusY - 14.0f;
+        // 2. Hunger Bar (10 Minecraft hunger shanks on the right)
+        float hunger = player.getHunger();
+        float hungerStartX = startX + totalHotbarW - 10.0f * iconStep;
         for (int i = 0; i < 10; ++i) {
-            float ax = startX + i * iconStep;
-            float ay = armorY;
-            if (armor >= (i + 1) * 2.0f) {
-                glm::vec4 uvArmor = TextureAtlas::getTileUV(TextureAtlas::TILE_ARMOR_FULL);
-                addTexturedQuad(ax, ay, iconW, iconW, uvArmor, glm::vec3(1.0f));
-            } else if (armor >= i * 2.0f + 1.0f) {
-                glm::vec4 uvHalfArmor = TextureAtlas::getTileUV(TextureAtlas::TILE_ARMOR_HALF);
-                addTexturedQuad(ax, ay, iconW, iconW, uvHalfArmor, glm::vec3(1.0f));
+            float hx = hungerStartX + (9 - i) * iconStep;
+            float hy = statusY;
+            // Background empty drumstick
+            glm::vec4 uvEmpty = TextureAtlas::getTileUV(TextureAtlas::TILE_HUNGER_EMPTY);
+            addTexturedQuad(hx, hy, iconW, iconW, uvEmpty, glm::vec3(1.0f));
+
+            if (hunger >= (i + 1) * 2.0f) {
+                glm::vec4 uvFull = TextureAtlas::getTileUV(TextureAtlas::TILE_HUNGER_FULL);
+                addTexturedQuad(hx, hy, iconW, iconW, uvFull, glm::vec3(1.0f));
+            } else if (hunger >= i * 2.0f + 1.0f) {
+                glm::vec4 uvHalf = TextureAtlas::getTileUV(TextureAtlas::TILE_HUNGER_HALF);
+                addTexturedQuad(hx, hy, iconW, iconW, uvHalf, glm::vec3(1.0f));
+            }
+        }
+
+        // 3. Oxygen Bar (10 Bubbles above Hunger Bar when underwater)
+        float oxygen = player.getOxygen();
+        if (player.isUnderwater() || oxygen < 10.0f) {
+            float bubbleY = statusY - 14.0f;
+            for (int i = 0; i < 10; ++i) {
+                float bx = hungerStartX + (9 - i) * iconStep;
+                float by = bubbleY;
+                if (oxygen >= (i + 1) * 1.0f) {
+                    glm::vec4 uvBubble = TextureAtlas::getTileUV(TextureAtlas::TILE_BUBBLE);
+                    addTexturedQuad(bx, by, iconW, iconW, uvBubble, glm::vec3(1.0f));
+                } else if (oxygen >= i * 1.0f + 0.5f) {
+                    glm::vec4 uvPop = TextureAtlas::getTileUV(TextureAtlas::TILE_BUBBLE_POP);
+                    addTexturedQuad(bx, by, iconW, iconW, uvPop, glm::vec3(1.0f));
+                }
+            }
+        }
+
+        // 4. Armor Bar (above Health Bar when armor > 0)
+        float armor = player.getArmor();
+        if (armor > 0.0f) {
+            float armorY = statusY - 14.0f;
+            for (int i = 0; i < 10; ++i) {
+                float ax = startX + i * iconStep;
+                float ay = armorY;
+                if (armor >= (i + 1) * 2.0f) {
+                    glm::vec4 uvArmor = TextureAtlas::getTileUV(TextureAtlas::TILE_ARMOR_FULL);
+                    addTexturedQuad(ax, ay, iconW, iconW, uvArmor, glm::vec3(1.0f));
+                } else if (armor >= i * 2.0f + 1.0f) {
+                    glm::vec4 uvHalfArmor = TextureAtlas::getTileUV(TextureAtlas::TILE_ARMOR_HALF);
+                    addTexturedQuad(ax, ay, iconW, iconW, uvHalfArmor, glm::vec3(1.0f));
+                }
             }
         }
     }
@@ -344,7 +369,7 @@ void UIRenderer::updateDynamicUI(uint32_t f,
         addThickLine(v2, v0, borderThickness, borderColor);
 
         auto draw3DItemIcon = [&](float icx, float icy, float iconS, BlockType blockType) {
-            if (Cell{blockType}.isItem()) {
+            if (Cell{blockType}.isFlatItem()) {
                 uint32_t itemTile = TextureAtlas::getTileForBlock(blockType, 0);
                 glm::vec4 itemUV = TextureAtlas::getTileUV(itemTile);
                 addTexturedQuad(icx - iconS * 0.5f, icy - iconS * 0.5f, iconS, iconS, itemUV, glm::vec3(1.0f));
@@ -411,7 +436,7 @@ void UIRenderer::updateDynamicUI(uint32_t f,
         std::string specBanner = "[SPECTATOR / FREE CAM MODE] (Press F6 to exit)";
         float bW = FontRenderer::getTextWidth(specBanner, 13.0f);
         float bx = (static_cast<float>(screenWidth) - bW) * 0.5f;
-        addTexturedQuad(bx - 10.0f, 16.0f, bW + 20.0f, 22.0f, TextureAtlas::getTileUV(127), glm::vec3(0.08f, 0.08f, 0.12f));
+        addTexturedQuad(bx - 10.0f, 16.0f, bW + 20.0f, 22.0f, TextureAtlas::getTileUV(TextureAtlas::TILE_TINT_DARK), glm::vec3(0.08f, 0.08f, 0.12f));
         FontRenderer::drawText(vertices, indices, specBanner, bx, 20.0f, 13.0f, glm::vec3(1.0f, 0.85f, 0.20f), true);
     }
 
@@ -419,7 +444,7 @@ void UIRenderer::updateDynamicUI(uint32_t f,
     if (feedbackTimer > 0.0f && !feedbackMsg.empty()) {
         float fbY = static_cast<float>(screenHeight) - (isChatOpen ? 72.0f : 45.0f);
         float fbW = FontRenderer::getTextWidth(feedbackMsg, 13.0f) + 16.0f;
-        addTexturedQuad(10.0f, fbY - 2.0f, fbW, 20.0f, TextureAtlas::getTileUV(127), glm::vec3(0.08f, 0.08f, 0.12f));
+        addTexturedQuad(10.0f, fbY - 2.0f, fbW, 20.0f, TextureAtlas::getTileUV(TextureAtlas::TILE_TINT_DARK), glm::vec3(0.08f, 0.08f, 0.12f));
         FontRenderer::drawText(vertices, indices, feedbackMsg, 16.0f, fbY + 2.0f, 13.0f, glm::vec3(1.0f, 0.95f, 0.35f), true);
     }
 
@@ -427,11 +452,40 @@ void UIRenderer::updateDynamicUI(uint32_t f,
     if (isChatOpen) {
         float chatY = static_cast<float>(screenHeight) - 38.0f;
         float chatW = std::min(static_cast<float>(screenWidth) - 20.0f, 600.0f);
-        addTexturedQuad(10.0f, chatY, chatW, 26.0f, TextureAtlas::getTileUV(127), glm::vec3(0.05f, 0.05f, 0.08f));
+        addTexturedQuad(10.0f, chatY, chatW, 26.0f, TextureAtlas::getTileUV(TextureAtlas::TILE_TINT_DARK), glm::vec3(0.05f, 0.05f, 0.08f));
         addTexturedQuad(10.0f, chatY, chatW, 1.5f, TextureAtlas::getTileUV(TextureAtlas::TILE_WHITE), glm::vec3(0.45f, 0.45f, 0.55f));
         addTexturedQuad(10.0f, chatY + 25.0f, chatW, 1.5f, TextureAtlas::getTileUV(TextureAtlas::TILE_WHITE), glm::vec3(0.45f, 0.45f, 0.55f));
         std::string displayText = "> " + chatInput + "_";
         FontRenderer::drawText(vertices, indices, displayText, 16.0f, chatY + 6.0f, 13.0f, glm::vec3(1.0f, 1.0f, 1.0f), true);
+    }
+
+    // 7. Sleeping Vignette & Fade Overlay
+    if (sleepFadeAlpha > 0.005f) {
+        float alpha = std::clamp(sleepFadeAlpha, 0.01f, 1.0f);
+        float sw = static_cast<float>(screenWidth);
+        float sh = static_cast<float>(screenHeight);
+        glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::TILE_WHITE);
+
+        uint32_t b = static_cast<uint32_t>(vertices.size());
+        glm::vec3 norm(0.0f, 0.0f, alpha);
+        glm::vec3 black(0.0f, 0.0f, 0.0f);
+        vertices.push_back({glm::vec3(0.0f, sh, 0.0f), glm::vec2(uv.x, uv.w), norm, black});
+        vertices.push_back({glm::vec3(sw, sh, 0.0f), glm::vec2(uv.z, uv.w), norm, black});
+        vertices.push_back({glm::vec3(sw, 0.0f, 0.0f), glm::vec2(uv.z, uv.y), norm, black});
+        vertices.push_back({glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(uv.x, uv.y), norm, black});
+        indices.push_back(b + 0); indices.push_back(b + 1); indices.push_back(b + 2);
+        indices.push_back(b + 2); indices.push_back(b + 3); indices.push_back(b + 0);
+
+        if (alpha > 0.35f) {
+            float textAlpha = std::clamp((alpha - 0.35f) / 0.65f, 0.01f, 1.0f);
+            std::string msg1 = "Sleeping through the night...";
+            float w1 = FontRenderer::getTextWidth(msg1, 20.0f);
+            FontRenderer::drawText(vertices, indices, msg1, (sw - w1) * 0.5f, sh * 0.44f, 20.0f, glm::vec3(1.0f, 1.0f, 1.0f), true, textAlpha);
+
+            std::string msg2 = "Press [SHIFT] to leave bed";
+            float w2 = FontRenderer::getTextWidth(msg2, 13.0f);
+            FontRenderer::drawText(vertices, indices, msg2, (sw - w2) * 0.5f, sh * 0.52f, 13.0f, glm::vec3(0.85f, 0.85f, 0.85f), true, textAlpha);
+        }
     }
 
     m_uiIndexCount[f] = static_cast<uint32_t>(indices.size());
@@ -465,11 +519,13 @@ void UIRenderer::render(VkCommandBuffer cmd,
                         bool isChatOpen,
                         const std::string& chatInput,
                         const std::string& feedbackMsg,
-                        float feedbackTimer) {
+                        float feedbackTimer,
+                        VkDescriptorSet descSet,
+                        float sleepFadeAlpha) {
     if (screenWidth == 0 || screenHeight == 0) return;
 
     uint32_t f = m_cmdQueue.getCurrentFrame();
-    updateDynamicUI(f, player, screenWidth, screenHeight, fps, options, world, isChatOpen, chatInput, feedbackMsg, feedbackTimer);
+    updateDynamicUI(f, player, screenWidth, screenHeight, fps, options, world, isChatOpen, chatInput, feedbackMsg, feedbackTimer, sleepFadeAlpha);
 
     glm::mat4 proj = glm::ortho(0.0f, static_cast<float>(screenWidth), static_cast<float>(screenHeight), 0.0f, -1.0f, 1.0f);
 
@@ -479,10 +535,14 @@ void UIRenderer::render(VkCommandBuffer cmd,
     pc.lightColor[0] = 1.0f; pc.lightColor[1] = 1.0f; pc.lightColor[2] = 1.0f;
     pc.skyFog[3] = 1000.0f;
 
-    // 1. Draw Thematic Inverted 3-Spoke Star Crosshair at center (except in spectator freecam)
-    if (player.getCamera().getMode() != CameraMode::FreeCam && m_chIndexCount > 0 && m_chVbo.isValid()) {
+    // 1. Draw Thematic Inverted 3-Spoke Star Crosshair at center (except in spectator freecam or when sleeping)
+    if (player.getCamera().getMode() != CameraMode::FreeCam && m_chIndexCount > 0 && m_chVbo.isValid() && sleepFadeAlpha <= 0.005f) {
         const Pipeline& chPipeline = invertPipeline ? *invertPipeline : uiPipeline;
         chPipeline.bind(cmd);
+
+        if (descSet != VK_NULL_HANDLE) {
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, chPipeline.getLayout(), 0, 1, &descSet, 0, nullptr);
+        }
 
         float cx = static_cast<float>(screenWidth) * 0.5f;
         float cy = static_cast<float>(screenHeight) * 0.5f;
@@ -508,6 +568,11 @@ void UIRenderer::render(VkCommandBuffer cmd,
     // 2. Draw Dynamic UI (HUD, Hearts, Oxygen, Hotbar)
     if (m_uiIndexCount[f] > 0 && m_uiVertexBuffer[f].isValid()) {
         uiPipeline.bind(cmd);
+
+        if (descSet != VK_NULL_HANDLE) {
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, uiPipeline.getLayout(), 0, 1, &descSet, 0, nullptr);
+        }
+
         vkCmdPushConstants(cmd, uiPipeline.getLayout(),
             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             0, sizeof(PushConstants), &pc);

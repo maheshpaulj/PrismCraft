@@ -4,7 +4,9 @@
 #include "Coordinates.hpp"
 #include "world/World.hpp"
 #include "world/TerrainGen.hpp"
+#include "world/Biome.hpp"
 #include "renderer/TextureAtlas.hpp"
+#include "data/BlockRegistry.hpp"
 #include <algorithm>
 
 namespace prismcraft {
@@ -57,6 +59,23 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
         mesh.opaqueVertices.push_back({v1, glm::vec2(uv.x, uv.y), normal, c1});
         mesh.opaqueVertices.push_back({v2, glm::vec2(uv.z, uv.y), normal, c2});
         mesh.opaqueVertices.push_back({v3, glm::vec2(uv.z, uv.w), normal, c3});
+        mesh.opaqueIndices.push_back(baseIdx + 0);
+        mesh.opaqueIndices.push_back(baseIdx + 1);
+        mesh.opaqueIndices.push_back(baseIdx + 2);
+        mesh.opaqueIndices.push_back(baseIdx + 2);
+        mesh.opaqueIndices.push_back(baseIdx + 3);
+        mesh.opaqueIndices.push_back(baseIdx + 0);
+    };
+
+    auto addOpaqueQuadAdv = [&](const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2, const glm::vec3& v3,
+                                const glm::vec4& uv,
+                                const glm::vec3& n0, const glm::vec3& n1, const glm::vec3& n2, const glm::vec3& n3,
+                                const glm::vec3& c0, const glm::vec3& c1, const glm::vec3& c2, const glm::vec3& c3) {
+        uint32_t baseIdx = static_cast<uint32_t>(mesh.opaqueVertices.size());
+        mesh.opaqueVertices.push_back({v0, glm::vec2(uv.x, uv.w), n0, c0});
+        mesh.opaqueVertices.push_back({v1, glm::vec2(uv.x, uv.y), n1, c1});
+        mesh.opaqueVertices.push_back({v2, glm::vec2(uv.z, uv.y), n2, c2});
+        mesh.opaqueVertices.push_back({v3, glm::vec2(uv.z, uv.w), n3, c3});
         mesh.opaqueIndices.push_back(baseIdx + 0);
         mesh.opaqueIndices.push_back(baseIdx + 1);
         mesh.opaqueIndices.push_back(baseIdx + 2);
@@ -326,7 +345,7 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
     auto shouldDrawFace = [&](Cell c, Cell n) -> bool {
         if (!n.isTransparent()) return false;
         if (c.type == BlockType::Water && n.type == BlockType::Water) return false;
-        if (c.type == BlockType::Leaves && n.type == BlockType::Leaves) return true; // Fancy leaves: draw transparent cutouts!
+        if (c.isLeaves() && n.isLeaves()) return true; // Fancy leaves: draw transparent cutouts!
         return true;
     };
 
@@ -339,33 +358,946 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                     Cell cell = chunk.getCell(x, y, z, s);
                     if (cell.type == BlockType::Air) continue;
 
-                    // 1. Foliage & Torch Rendering (Crossed Quads with alpha cutout)
-                    if (cell.isFoliage() || cell.isTorch()) {
+                    // 1. Foliage Rendering (Crossed Quads with alpha cutout)
+                    if (cell.isFoliage()) {
                         glm::vec3 center = cellToWorldCenter(wx, y, wz, s);
                         center.y = static_cast<float>(y); // Base at ground level
                         glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(cell.type, 0));
-                        float hw = cell.isTorch() ? 0.16f : 0.38f;
-                        float fh = cell.isTorch() ? 0.62f : 0.85f;
+                        float hw = 0.38f;
+                        float fh = 0.85f;
                         float sunlight = getSunlightFactor(x, y, z);
                         float torchL = getTorchLight(center);
-                        glm::vec3 folColorBot = cell.isTorch() ? glm::vec3(1.0f, 1.0f, 1.0f) : glm::vec3(sunlight, 0.72f, torchL);
-                        glm::vec3 folColorTop = cell.isTorch() ? glm::vec3(1.0f, 1.0f, 1.0f) : glm::vec3(sunlight, 1.0f, torchL);
+                        glm::vec3 folColorBot(sunlight, 0.72f, torchL);
+                        glm::vec3 folColorTop(sunlight, 1.0f, torchL);
+
+                        // Foliage normals: bottom anchored (normLen 1.0 -> no sway), top sways (normLen 2.0 -> full wave)
+                        glm::vec3 nFolBot = nTop * 1.0f;
+                        glm::vec3 nFolTop = nTop * 2.0f;
 
                         // Diagonal quad 1 (Double sided)
-                        addOpaqueQuad(center + glm::vec3(-hw, 0.0f, -hw), center + glm::vec3(-hw, fh, -hw),
-                                      center + glm::vec3(hw, fh, hw), center + glm::vec3(hw, 0.0f, hw),
-                                      uv, nTop, folColorBot, folColorTop, folColorTop, folColorBot);
-                        addOpaqueQuad(center + glm::vec3(hw, 0.0f, hw), center + glm::vec3(hw, fh, hw),
-                                      center + glm::vec3(-hw, fh, -hw), center + glm::vec3(-hw, 0.0f, -hw),
-                                      uv, nTop, folColorBot, folColorTop, folColorTop, folColorBot);
+                        addOpaqueQuadAdv(center + glm::vec3(-hw, 0.0f, -hw), center + glm::vec3(-hw, fh, -hw),
+                                         center + glm::vec3(hw, fh, hw), center + glm::vec3(hw, 0.0f, hw),
+                                         uv, nFolBot, nFolTop, nFolTop, nFolBot, folColorBot, folColorTop, folColorTop, folColorBot);
+                        addOpaqueQuadAdv(center + glm::vec3(hw, 0.0f, hw), center + glm::vec3(hw, fh, hw),
+                                         center + glm::vec3(-hw, fh, -hw), center + glm::vec3(-hw, 0.0f, -hw),
+                                         uv, nFolBot, nFolTop, nFolTop, nFolBot, folColorBot, folColorTop, folColorTop, folColorBot);
 
                         // Diagonal quad 2 (Double sided)
-                        addOpaqueQuad(center + glm::vec3(-hw, 0.0f, hw), center + glm::vec3(-hw, fh, hw),
-                                      center + glm::vec3(hw, fh, -hw), center + glm::vec3(hw, 0.0f, -hw),
-                                      uv, nTop, folColorBot, folColorTop, folColorTop, folColorBot);
-                        addOpaqueQuad(center + glm::vec3(hw, 0.0f, -hw), center + glm::vec3(hw, fh, -hw),
-                                      center + glm::vec3(-hw, fh, hw), center + glm::vec3(-hw, 0.0f, hw),
-                                      uv, nTop, folColorBot, folColorTop, folColorTop, folColorBot);
+                        addOpaqueQuadAdv(center + glm::vec3(-hw, 0.0f, hw), center + glm::vec3(-hw, fh, hw),
+                                         center + glm::vec3(hw, fh, -hw), center + glm::vec3(hw, 0.0f, -hw),
+                                         uv, nFolBot, nFolTop, nFolTop, nFolBot, folColorBot, folColorTop, folColorTop, folColorBot);
+                        addOpaqueQuadAdv(center + glm::vec3(hw, 0.0f, -hw), center + glm::vec3(hw, fh, -hw),
+                                         center + glm::vec3(-hw, fh, hw), center + glm::vec3(-hw, 0.0f, hw),
+                                         uv, nFolBot, nFolTop, nFolTop, nFolBot, folColorBot, folColorTop, folColorTop, folColorBot);
+                        continue;
+                    }
+
+                    // 1b. True 3D Torch Model (Floor standing or wall-mounted angled into the room)
+                    if (cell.isTorch()) {
+                        glm::vec3 center = cellToWorldCenter(wx, y, wz, s);
+                        uint8_t attachment = cell.getTorchAttachment(); // 0 = floor, 1 = Base wall, 2 = Left wall, 3 = Right wall
+
+                        glm::vec3 pBase;
+                        glm::vec3 torchAxis;
+                        glm::vec3 sideDir;
+                        glm::vec3 frontDir;
+
+                        if (attachment == 0) {
+                            // Floor torch: standing vertical in cell centroid
+                            pBase = glm::vec3(center.x, static_cast<float>(y), center.z);
+                            torchAxis = glm::vec3(0.0f, 1.0f, 0.0f);
+                            sideDir   = glm::vec3(1.0f, 0.0f, 0.0f);
+                            frontDir  = glm::vec3(0.0f, 0.0f, 1.0f);
+                        } else {
+                            // Wall torch: attached to wall, leaning ~22 degrees inward
+                            glm::vec2 vXZ[3];
+                            getPrismVerticesXZ(wx, wz, s, vXZ);
+
+                            glm::vec2 wP0, wP1;
+                            glm::vec3 wallDir; // Direction pointing INTO the cell from the wall
+
+                            if (attachment == 1) {
+                                // Base wall
+                                if (s == 0) { wP0 = vXZ[0]; wP1 = vXZ[1]; wallDir = glm::vec3(0.0f, 0.0f, 1.0f); }
+                                else        { wP0 = vXZ[1]; wP1 = vXZ[2]; wallDir = glm::vec3(0.0f, 0.0f, -1.0f); }
+                            } else if (attachment == 2) {
+                                // Left slanted wall
+                                wP0 = vXZ[0]; wP1 = vXZ[2];
+                                wallDir = (s == 0) ? glm::vec3(SQRT_3_OVER_2, 0.0f, -0.5f) : glm::vec3(SQRT_3_OVER_2, 0.0f, 0.5f);
+                            } else {
+                                // Right slanted wall
+                                if (s == 0) { wP0 = vXZ[1]; wP1 = vXZ[2]; wallDir = glm::vec3(-SQRT_3_OVER_2, 0.0f, -0.5f); }
+                                else        { wP0 = vXZ[0]; wP1 = vXZ[1]; wallDir = glm::vec3(-SQRT_3_OVER_2, 0.0f, 0.5f); }
+                            }
+
+                            glm::vec2 wallMid = (wP0 + wP1) * 0.5f;
+                            pBase = glm::vec3(wallMid.x, static_cast<float>(y) + 0.22f, wallMid.y) + wallDir * 0.04f;
+
+                            torchAxis = glm::normalize(glm::vec3(0.0f, 1.0f, 0.0f) + wallDir * 0.38f);
+                            sideDir = glm::cross(torchAxis, wallDir);
+                            if (glm::length(sideDir) > 0.01f) {
+                                sideDir = glm::normalize(sideDir);
+                            } else {
+                                sideDir = glm::vec3(1.0f, 0.0f, 0.0f);
+                            }
+                            frontDir = glm::cross(sideDir, torchAxis);
+                        }
+
+                        // Geometry dimensions: authentic Minecraft 2x10 pixel 3D torch cuboid
+                        float hw = 0.0625f;  // 1/16 block (2/16 = 0.125m total width)
+                        float hTotal = 0.625f; // 10/16 block (0.625m height)
+
+                        glm::vec4 uvTorch = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(cell.type, 0));
+                        float uSpan = (uvTorch.z - uvTorch.x);
+                        float vSpan = (uvTorch.w - uvTorch.y);
+
+                        // 4 Side walls: columns 7..8 (u: 7/16 to 9/16), rows 6..15 (v: 6/16 to 16/16)
+                        glm::vec4 uvSide(uvTorch.x + uSpan * (7.0f / 16.0f),
+                                         uvTorch.y + vSpan * (6.0f / 16.0f),
+                                         uvTorch.x + uSpan * (9.0f / 16.0f),
+                                         uvTorch.w);
+
+                        // Top cap: columns 7..8, rows 6..7 (flame top tip)
+                        glm::vec4 uvTop(uvTorch.x + uSpan * (7.0f / 16.0f),
+                                        uvTorch.y + vSpan * (6.0f / 16.0f),
+                                        uvTorch.x + uSpan * (9.0f / 16.0f),
+                                        uvTorch.y + vSpan * (8.0f / 16.0f));
+
+                        // Bottom cap: columns 7..8, rows 14..15 (stick base)
+                        glm::vec4 uvBot(uvTorch.x + uSpan * (7.0f / 16.0f),
+                                        uvTorch.y + vSpan * (14.0f / 16.0f),
+                                        uvTorch.x + uSpan * (9.0f / 16.0f),
+                                        uvTorch.w);
+
+                        glm::vec3 flameCol(1.0f, 1.0f, 1.0f); // 100% emissive flame radiance
+                        if (cell.type == BlockType::TorchSoul) {
+                            flameCol = glm::vec3(0.3f, 0.95f, 1.0f);
+                        } else if (cell.type == BlockType::TorchRedstone) {
+                            flameCol = glm::vec3(1.0f, 0.2f, 0.2f);
+                        }
+
+                        auto getP = [&](float dx, float dy, float dz) -> glm::vec3 {
+                            return pBase + sideDir * dx + torchAxis * dy + frontDir * dz;
+                        };
+
+                        auto addTorchQuad = [&](const glm::vec3& bl, const glm::vec3& tl, const glm::vec3& tr, const glm::vec3& br,
+                                                const glm::vec4& uv, const glm::vec3& norm, const glm::vec3& col) {
+                            addOpaqueQuad(bl, tl, tr, br, uv, norm, col, col, col, col);
+                        };
+
+                        // 1. Bottom Cap (-torchAxis)
+                        addTorchQuad(getP(-hw, 0.0f, -hw), getP(-hw, 0.0f,  hw), getP( hw, 0.0f,  hw), getP( hw, 0.0f, -hw),
+                                     uvBot, -torchAxis, flameCol);
+
+                        // 2. Top Cap (+torchAxis)
+                        addTorchQuad(getP(-hw, hTotal,  hw), getP(-hw, hTotal, -hw), getP( hw, hTotal, -hw), getP( hw, hTotal,  hw),
+                                     uvTop, torchAxis, flameCol);
+
+                        // 3. Front Face (+frontDir)
+                        addTorchQuad(getP( hw, 0.0f,  hw), getP( hw, hTotal,  hw), getP(-hw, hTotal,  hw), getP(-hw, 0.0f,  hw),
+                                     uvSide, frontDir, flameCol);
+
+                        // 4. Back Face (-frontDir)
+                        addTorchQuad(getP(-hw, 0.0f, -hw), getP(-hw, hTotal, -hw), getP( hw, hTotal, -hw), getP( hw, 0.0f, -hw),
+                                     uvSide, -frontDir, flameCol);
+
+                        // 5. Right Face (+sideDir)
+                        addTorchQuad(getP( hw, 0.0f, -hw), getP( hw, hTotal, -hw), getP( hw, hTotal,  hw), getP( hw, 0.0f,  hw),
+                                     uvSide, sideDir, flameCol);
+
+                        // 6. Left Face (-sideDir)
+                        addTorchQuad(getP(-hw, 0.0f,  hw), getP(-hw, hTotal,  hw), getP(-hw, hTotal, -hw), getP(-hw, 0.0f, -hw),
+                                     uvSide, -sideDir, flameCol);
+
+                        continue;
+                    }
+
+                    // 1b-2. True 3D Lantern Model (Standing on floor or hanging from ceiling)
+                    if (cell.isLantern()) {
+                        glm::vec2 vXZ[3];
+                        getPrismVerticesXZ(wx, wz, s, vXZ);
+                        glm::vec2 cent = (vXZ[0] + vXZ[1] + vXZ[2]) / 3.0f;
+
+                        bool isHanging = false;
+                        if (y + 1 < CHUNK_SIZE_Y) {
+                            Cell cellAbove = chunk.getCell(x, y + 1, z, s);
+                            isHanging = cellAbove.isSolid() && cellAbove.isOpaque();
+                        }
+
+                        float py = static_cast<float>(y);
+                        float halfW = 0.17f;
+                        float hBody = 0.44f;
+                        float yBottom = isHanging ? (py + 1.0f - hBody - 0.12f) : py;
+                        float yTop = yBottom + hBody;
+
+                        int tileLantern = TextureAtlas::getTileForBlock(cell.type, 0);
+                        glm::vec4 uv = TextureAtlas::getTileUV(tileLantern);
+
+                        glm::vec3 lantCol = (cell.type == BlockType::LanternSoul)
+                            ? glm::vec3(0.3f, 1.0f, 1.0f)
+                            : glm::vec3(1.0f, 1.0f, 0.95f);
+
+                        // 4 side walls of lantern box
+                        addOpaqueQuad(glm::vec3(cent.x - halfW, yBottom, cent.y + halfW),
+                                      glm::vec3(cent.x - halfW, yTop,    cent.y + halfW),
+                                      glm::vec3(cent.x + halfW, yTop,    cent.y + halfW),
+                                      glm::vec3(cent.x + halfW, yBottom, cent.y + halfW),
+                                      uv, glm::vec3(0, 0, 1), lantCol, lantCol, lantCol, lantCol);
+                        addOpaqueQuad(glm::vec3(cent.x + halfW, yBottom, cent.y - halfW),
+                                      glm::vec3(cent.x + halfW, yTop,    cent.y - halfW),
+                                      glm::vec3(cent.x - halfW, yTop,    cent.y - halfW),
+                                      glm::vec3(cent.x - halfW, yBottom, cent.y - halfW),
+                                      uv, glm::vec3(0, 0, -1), lantCol, lantCol, lantCol, lantCol);
+                        addOpaqueQuad(glm::vec3(cent.x + halfW, yBottom, cent.y + halfW),
+                                      glm::vec3(cent.x + halfW, yTop,    cent.y + halfW),
+                                      glm::vec3(cent.x + halfW, yTop,    cent.y - halfW),
+                                      glm::vec3(cent.x + halfW, yBottom, cent.y - halfW),
+                                      uv, glm::vec3(1, 0, 0), lantCol, lantCol, lantCol, lantCol);
+                        addOpaqueQuad(glm::vec3(cent.x - halfW, yBottom, cent.y - halfW),
+                                      glm::vec3(cent.x - halfW, yTop,    cent.y - halfW),
+                                      glm::vec3(cent.x - halfW, yTop,    cent.y + halfW),
+                                      glm::vec3(cent.x - halfW, yBottom, cent.y + halfW),
+                                      uv, glm::vec3(-1, 0, 0), lantCol, lantCol, lantCol, lantCol);
+
+                        // Top & Bottom caps
+                        addOpaqueQuad(glm::vec3(cent.x - halfW, yTop, cent.y + halfW),
+                                      glm::vec3(cent.x + halfW, yTop, cent.y + halfW),
+                                      glm::vec3(cent.x + halfW, yTop, cent.y - halfW),
+                                      glm::vec3(cent.x - halfW, yTop, cent.y - halfW),
+                                      uv, glm::vec3(0, 1, 0), lantCol, lantCol, lantCol, lantCol);
+                        addOpaqueQuad(glm::vec3(cent.x - halfW, yBottom, cent.y - halfW),
+                                      glm::vec3(cent.x + halfW, yBottom, cent.y - halfW),
+                                      glm::vec3(cent.x + halfW, yBottom, cent.y + halfW),
+                                      glm::vec3(cent.x - halfW, yBottom, cent.y + halfW),
+                                      uv, glm::vec3(0, -1, 0), lantCol, lantCol, lantCol, lantCol);
+
+                        // Chain if hanging
+                        if (isHanging) {
+                            float chW = 0.035f;
+                            addOpaqueQuad(glm::vec3(cent.x - chW, yTop, cent.y),
+                                          glm::vec3(cent.x - chW, py + 1.0f, cent.y),
+                                          glm::vec3(cent.x + chW, py + 1.0f, cent.y),
+                                          glm::vec3(cent.x + chW, yTop, cent.y),
+                                          uv, glm::vec3(0, 0, 1), lantCol * 0.7f, lantCol * 0.7f, lantCol * 0.7f, lantCol * 0.7f);
+                        }
+
+                        continue;
+                    }
+
+                    // 1b-3. True 3D Trapdoor Model (Horizontal closed hatch or vertical open flap)
+                    if (cell.isTrapdoor()) {
+                        bool isOpen = cell.isTrapdoorOpen();
+                        uint8_t facing = cell.getTrapdoorFacing(); // 0 = Base wall, 1 = Left wall, 2 = Right wall
+                        glm::vec2 vXZ[3];
+                        getPrismVerticesXZ(wx, wz, s, vXZ);
+
+                        float py = static_cast<float>(y);
+                        float thick = 0.1875f; // 3/16 block thickness (authentic Minecraft)
+
+                        int tileTrapdoor = TextureAtlas::getTileForBlock(cell.type, 0);
+                        glm::vec4 uvTrapdoor = TextureAtlas::getTileUV(tileTrapdoor);
+
+                        // Wood-matching plank texture for edges
+                        std::string plankName = "oak_planks";
+                        if (cell.type == BlockType::TrapdoorSpruce) plankName = "spruce_planks";
+                        else if (cell.type == BlockType::TrapdoorBirch) plankName = "birch_planks";
+                        else if (cell.type == BlockType::TrapdoorJungle) plankName = "jungle_planks";
+                        else if (cell.type == BlockType::TrapdoorAcacia) plankName = "acacia_planks";
+                        else if (cell.type == BlockType::TrapdoorDarkOak) plankName = "dark_oak_planks";
+                        else if (cell.type == BlockType::TrapdoorIron) plankName = "iron_block";
+
+                        int tilePlank = BlockRegistry::getTextureTile(plankName);
+                        if (tilePlank < 0) tilePlank = (cell.type == BlockType::TrapdoorIron) ? 22 : 4;
+                        glm::vec4 rawUvPlank = TextureAtlas::getTileUV(tilePlank);
+                        float edgeVSpan = (rawUvPlank.w - rawUvPlank.y) * (thick / 1.0f);
+                        glm::vec4 uvEdge(rawUvPlank.x, rawUvPlank.y, rawUvPlank.z, rawUvPlank.y + edgeVSpan);
+
+                        // Wall vertices w0 and w1, and inward normal wallIn
+                        glm::vec2 w0, w1;
+                        glm::vec2 wallIn;
+                        if (s == 0) {
+                            if (facing == 0)      { w0 = vXZ[0]; w1 = vXZ[1]; wallIn = glm::vec2(0.0f, 1.0f); }
+                            else if (facing == 1) { w0 = vXZ[0]; w1 = vXZ[2]; wallIn = glm::vec2(SQRT_3_OVER_2, -0.5f); }
+                            else                  { w0 = vXZ[1]; w1 = vXZ[2]; wallIn = glm::vec2(-SQRT_3_OVER_2, -0.5f); }
+                        } else {
+                            if (facing == 0)      { w0 = vXZ[1]; w1 = vXZ[2]; wallIn = glm::vec2(0.0f, -1.0f); }
+                            else if (facing == 1) { w0 = vXZ[0]; w1 = vXZ[2]; wallIn = glm::vec2(SQRT_3_OVER_2, 0.5f); }
+                            else                  { w0 = vXZ[0]; w1 = vXZ[1]; wallIn = glm::vec2(-SQRT_3_OVER_2, 0.5f); }
+                        }
+
+                        if (!isOpen) {
+                            // 3D Horizontal Slab on the floor (thickness 0.1875m)
+                            glm::vec3 b0(vXZ[0].x, py, vXZ[0].y);
+                            glm::vec3 b1(vXZ[1].x, py, vXZ[1].y);
+                            glm::vec3 b2(vXZ[2].x, py, vXZ[2].y);
+
+                            glm::vec3 t0(vXZ[0].x, py + thick, vXZ[0].y);
+                            glm::vec3 t1(vXZ[1].x, py + thick, vXZ[1].y);
+                            glm::vec3 t2(vXZ[2].x, py + thick, vXZ[2].y);
+
+                            glm::vec2 uvT0, uvT1, uvT2;
+                            if (s == 0) {
+                                uvT0 = glm::vec2(uvTrapdoor.x, uvTrapdoor.y);
+                                uvT1 = glm::vec2(uvTrapdoor.z, uvTrapdoor.y);
+                                uvT2 = glm::vec2(uvTrapdoor.x, uvTrapdoor.w);
+                            } else {
+                                uvT0 = glm::vec2(uvTrapdoor.z, uvTrapdoor.y);
+                                uvT1 = glm::vec2(uvTrapdoor.z, uvTrapdoor.w);
+                                uvT2 = glm::vec2(uvTrapdoor.x, uvTrapdoor.w);
+                            }
+
+                            auto [sTop, tTop] = getVertexLight((t0 + t1 + t2) / 3.0f, glm::vec3(0, 1, 0));
+                            glm::vec3 colTop(sTop, 1.0f, tTop);
+                            addOpaqueTri(t0, t2, t1, uvT0, uvT2, uvT1, glm::vec3(0, 1, 0), colTop, colTop, colTop);
+
+                            auto [sBot, tBot] = getVertexLight((b0 + b1 + b2) / 3.0f, glm::vec3(0, -1, 0));
+                            glm::vec3 colBot(sBot, 1.0f, tBot);
+                            addOpaqueTri(b0, b1, b2, uvT0, uvT1, uvT2, glm::vec3(0, -1, 0), colBot, colBot, colBot);
+
+                            // 3 Side edge quads with proportional wood plank texture
+                            glm::vec2 e0 = vXZ[1] - vXZ[0];
+                            glm::vec3 n0 = glm::normalize(glm::vec3(e0.y, 0.0f, -e0.x));
+                            auto [s0, torch0] = getVertexLight((b0 + b1 + t1 + t0) * 0.25f, n0);
+                            glm::vec3 col0(s0, 1.0f, torch0);
+                            addOpaqueQuad(b0, t0, t1, b1, uvEdge, n0, col0, col0, col0, col0);
+
+                            glm::vec2 e1 = vXZ[2] - vXZ[1];
+                            glm::vec3 n1 = glm::normalize(glm::vec3(e1.y, 0.0f, -e1.x));
+                            auto [s1, torch1] = getVertexLight((b1 + b2 + t2 + t1) * 0.25f, n1);
+                            glm::vec3 col1(s1, 1.0f, torch1);
+                            addOpaqueQuad(b1, t1, t2, b2, uvEdge, n1, col1, col1, col1, col1);
+
+                            glm::vec2 e2 = vXZ[0] - vXZ[2];
+                            glm::vec3 n2 = glm::normalize(glm::vec3(e2.y, 0.0f, -e2.x));
+                            auto [s2, torch2] = getVertexLight((b2 + b0 + t0 + t2) * 0.25f, n2);
+                            glm::vec3 col2(s2, 1.0f, torch2);
+                            addOpaqueQuad(b2, t2, t0, b0, uvEdge, n2, col2, col2, col2, col2);
+                        } else {
+                            // Full 3D Upright Open Flap (6 faces, thickness 0.1875m) attached to hinge wall
+                            glm::vec3 vecSpan(w1.x - w0.x, 0.0f, w1.y - w0.y);
+                            glm::vec3 vecThick = glm::vec3(wallIn.x, 0.0f, wallIn.y) * thick;
+                            glm::vec3 vecUp(0.0f, 1.0f, 0.0f);
+                            glm::vec3 pBase = glm::vec3(w0.x, py, w0.y) + glm::vec3(wallIn.x, 0.0f, wallIn.y) * 0.015f;
+
+                            glm::vec3 c0 = pBase;
+                            glm::vec3 c1 = pBase + vecSpan;
+                            glm::vec3 c2 = pBase + vecSpan + vecThick;
+                            glm::vec3 c3 = pBase + vecThick;
+
+                            glm::vec3 c4 = c0 + vecUp;
+                            glm::vec3 c5 = c1 + vecUp;
+                            glm::vec3 c6 = c2 + vecUp;
+                            glm::vec3 c7 = c3 + vecUp;
+
+                            glm::vec3 normFront = glm::normalize(vecThick);
+                            glm::vec3 normBack  = -normFront;
+                            glm::vec3 normLeft  = -glm::normalize(vecSpan);
+                            glm::vec3 normRight =  glm::normalize(vecSpan);
+
+                            auto [sf, tf] = getVertexLight((c3 + c7 + c6 + c2) * 0.25f, normFront);
+                            glm::vec3 colFront(sf, 1.0f, tf);
+
+                            auto [sb, tb] = getVertexLight((c0 + c1 + c5 + c4) * 0.25f, normBack);
+                            glm::vec3 colBack(sb, 1.0f, tb);
+
+                            auto [sl, tl] = getVertexLight((c0 + c4 + c7 + c3) * 0.25f, normLeft);
+                            glm::vec3 colLeft(sl, 1.0f, tl);
+
+                            auto [sr, tr] = getVertexLight((c1 + c2 + c6 + c5) * 0.25f, normRight);
+                            glm::vec3 colRight(sr, 1.0f, tr);
+
+                            auto [st, tt] = getVertexLight((c4 + c5 + c6 + c7) * 0.25f, glm::vec3(0, 1, 0));
+                            glm::vec3 colTop(st, 1.0f, tt);
+
+                            auto [sbot, tbot] = getVertexLight((c0 + c1 + c2 + c3) * 0.25f, glm::vec3(0, -1, 0));
+                            glm::vec3 colBot(sbot, 1.0f, tbot);
+
+                            // 1. Front face (facing into cell room)
+                            addOpaqueQuad(c3, c7, c6, c2, uvTrapdoor, normFront, colFront, colFront, colFront, colFront);
+
+                            // 2. Back face (facing wall)
+                            glm::vec4 uvTrapdoorFlip(uvTrapdoor.z, uvTrapdoor.y, uvTrapdoor.x, uvTrapdoor.w);
+                            addOpaqueQuad(c1, c5, c4, c0, uvTrapdoorFlip, normBack, colBack, colBack, colBack, colBack);
+
+                            // 3. Left edge (at w0)
+                            addOpaqueQuad(c0, c4, c7, c3, uvEdge, normLeft, colLeft, colLeft, colLeft, colLeft);
+
+                            // 4. Right edge (at w1)
+                            addOpaqueQuad(c2, c6, c5, c1, uvEdge, normRight, colRight, colRight, colRight, colRight);
+
+                            // 5. Top edge
+                            addOpaqueQuad(c7, c4, c5, c6, uvEdge, glm::vec3(0, 1, 0), colTop, colTop, colTop, colTop);
+
+                            // 6. Bottom edge (floor hinge)
+                            addOpaqueQuad(c3, c2, c1, c0, uvEdge, glm::vec3(0, -1, 0), colBot, colBot, colBot, colBot);
+                        }
+
+                        continue;
+                    }
+
+                    // 1c. True 3D Door Model (Wooden & Iron Doors, Open/Closed Swing)
+                    if (cell.isDoor()) {
+                        bool isUpper = cell.isDoorUpper();
+                        bool isOpen = cell.isDoorOpen();
+                        uint8_t facing = cell.getDoorFacing(); // 0 = Base wall, 1 = Left wall, 2 = Right wall
+
+                        glm::vec2 vXZ[3];
+                        getPrismVerticesXZ(wx, wz, s, vXZ);
+
+                        // Wall vertices w0 and w1
+                        glm::vec2 w0, w1;
+                        glm::vec2 wallIn; // Direction pointing INTO cell from the wall
+
+                        if (s == 0) {
+                            if (facing == 0)      { w0 = vXZ[0]; w1 = vXZ[1]; wallIn = glm::vec2(0.0f, 1.0f); }
+                            else if (facing == 1) { w0 = vXZ[0]; w1 = vXZ[2]; wallIn = glm::vec2(SQRT_3_OVER_2, -0.5f); }
+                            else                  { w0 = vXZ[1]; w1 = vXZ[2]; wallIn = glm::vec2(-SQRT_3_OVER_2, -0.5f); }
+                        } else {
+                            if (facing == 0)      { w0 = vXZ[1]; w1 = vXZ[2]; wallIn = glm::vec2(0.0f, -1.0f); }
+                            else if (facing == 1) { w0 = vXZ[0]; w1 = vXZ[2]; wallIn = glm::vec2(SQRT_3_OVER_2, 0.5f); }
+                            else                  { w0 = vXZ[0]; w1 = vXZ[1]; wallIn = glm::vec2(-SQRT_3_OVER_2, 0.5f); }
+                        }
+
+                        glm::vec2 wallDir = glm::normalize(w1 - w0);
+                        float doorWidth = glm::length(w1 - w0);
+                        float doorThick = 0.1875f; // Authentic 3/16 block thickness
+                        float doorHeight = 1.0f;
+                        float py = static_cast<float>(y);
+
+                        // Orientation vectors
+                        glm::vec3 vecSpan;
+                        glm::vec3 vecThick;
+                        glm::vec3 pBase;
+
+                        if (!isOpen) {
+                            // Closed: spans along the doorway from w0 to w1
+                            vecSpan = glm::vec3(wallDir.x, 0.0f, wallDir.y) * doorWidth;
+                            vecThick = glm::vec3(wallIn.x, 0.0f, wallIn.y) * doorThick;
+                            pBase = glm::vec3(w0.x, py, w0.y) + glm::vec3(wallIn.x, 0.0f, wallIn.y) * 0.02f;
+                        } else {
+                            // Open: pivoted 90 degrees inward around hinge w0
+                            vecSpan = glm::vec3(wallIn.x, 0.0f, wallIn.y) * doorWidth;
+                            vecThick = glm::vec3(-wallDir.x, 0.0f, -wallDir.y) * doorThick;
+                            pBase = glm::vec3(w0.x, py, w0.y) + glm::vec3(wallIn.x, 0.0f, wallIn.y) * 0.02f;
+                        }
+
+                        glm::vec3 vecUp(0.0f, doorHeight, 0.0f);
+
+                        // 8 corners of the 3D door panel
+                        glm::vec3 c0 = pBase;
+                        glm::vec3 c1 = pBase + vecSpan;
+                        glm::vec3 c2 = pBase + vecSpan + vecThick;
+                        glm::vec3 c3 = pBase + vecThick;
+
+                        glm::vec3 c4 = c0 + vecUp;
+                        glm::vec3 c5 = c1 + vecUp;
+                        glm::vec3 c6 = c2 + vecUp;
+                        glm::vec3 c7 = c3 + vecUp;
+
+                        // Textures
+                        int tileDoor = -1;
+                        if (BlockRegistry::isInitialized()) {
+                            const auto& def = BlockRegistry::getDef(cell.type);
+                            const std::string& texName = isUpper ? def.texDoorUpper : def.texDoorLower;
+                            if (!texName.empty()) {
+                                tileDoor = BlockRegistry::getTextureTile(texName);
+                            }
+                        }
+                        if (tileDoor < 0) {
+                            tileDoor = (cell.type == BlockType::DoorIron)
+                                ? (isUpper ? TextureAtlas::TILE_DOOR_IRON_UPPER : TextureAtlas::TILE_DOOR_IRON_LOWER)
+                                : (isUpper ? TextureAtlas::TILE_DOOR_WOOD_UPPER : TextureAtlas::TILE_DOOR_WOOD_LOWER);
+                        }
+                        // Pick wood-matching plank texture for door edges
+                        std::string edgePlankName = "oak_planks";
+                        if (cell.type == BlockType::DoorSpruce) edgePlankName = "spruce_planks";
+                        else if (cell.type == BlockType::DoorBirch) edgePlankName = "birch_planks";
+                        else if (cell.type == BlockType::DoorJungle) edgePlankName = "jungle_planks";
+                        else if (cell.type == BlockType::DoorAcacia) edgePlankName = "acacia_planks";
+                        else if (cell.type == BlockType::DoorDarkOak) edgePlankName = "dark_oak_planks";
+                        else if (cell.type == BlockType::DoorIron) edgePlankName = "iron_block";
+
+                        int tileEdge = BlockRegistry::getTextureTile(edgePlankName);
+                        if (tileEdge < 0) tileEdge = (cell.type == BlockType::DoorIron) ? 22 : 4;
+
+                        glm::vec4 uvDoor = TextureAtlas::getTileUV(tileDoor);
+                        glm::vec4 rawUvEdge = TextureAtlas::getTileUV(tileEdge);
+                        // Proportional UV width matching door thickness (3/16 wide), preventing texture stretching
+                        float edgeUSpan = (rawUvEdge.z - rawUvEdge.x) * (doorThick / 1.0f);
+                        glm::vec4 uvEdge(rawUvEdge.x, rawUvEdge.y, rawUvEdge.x + edgeUSpan, rawUvEdge.w);
+                        float edgeVSpan = (rawUvEdge.w - rawUvEdge.y) * (doorThick / 1.0f);
+                        glm::vec4 uvEdgeCap(rawUvEdge.x, rawUvEdge.y, rawUvEdge.z, rawUvEdge.y + edgeVSpan);
+
+                        // Normals
+                        glm::vec3 normFront = -glm::normalize(vecThick);
+                        glm::vec3 normBack  =  glm::normalize(vecThick);
+                        glm::vec3 normHinge = -glm::normalize(vecSpan);
+                        glm::vec3 normLatch =  glm::normalize(vecSpan);
+
+                        // Lighting
+                        auto [s0, t0] = getVertexLight((c0 + c1 + c4 + c5) * 0.25f, normFront);
+                        glm::vec3 colFront(s0, 1.0f, t0);
+
+                        auto [s1, t1] = getVertexLight((c2 + c3 + c6 + c7) * 0.25f, normBack);
+                        glm::vec3 colBack(s1, 1.0f, t1);
+
+                        auto [s2, t2] = getVertexLight((c0 + c3 + c4 + c7) * 0.25f, normHinge);
+                        glm::vec3 colHinge(s2, 1.0f, t2);
+
+                        auto [s3, t3] = getVertexLight((c1 + c2 + c5 + c6) * 0.25f, normLatch);
+                        glm::vec3 colLatch(s3, 1.0f, t3);
+
+                        auto [sTop, tTop] = getVertexLight((c4 + c5 + c6 + c7) * 0.25f, glm::vec3(0, 1, 0));
+                        glm::vec3 colTop(sTop, 1.0f, tTop);
+
+                        auto [sBot, tBot] = getVertexLight((c0 + c1 + c2 + c3) * 0.25f, glm::vec3(0, -1, 0));
+                        glm::vec3 colBot(sBot, 1.0f, tBot);
+
+                        // 1. Front face (BL: c0, TL: c4, TR: c5, BR: c1)
+                        addOpaqueQuad(c0, c4, c5, c1, uvDoor, normFront, colFront, colFront, colFront, colFront);
+
+                        // 2. Back face (BL: c2, TL: c6, TR: c7, BR: c3) - UV flipped horizontally
+                        glm::vec4 uvDoorFlip(uvDoor.z, uvDoor.y, uvDoor.x, uvDoor.w);
+                        addOpaqueQuad(c2, c6, c7, c3, uvDoorFlip, normBack, colBack, colBack, colBack, colBack);
+
+                        // 3. Hinge edge (BL: c3, TL: c7, TR: c4, BR: c0)
+                        addOpaqueQuad(c3, c7, c4, c0, uvEdge, normHinge, colHinge, colHinge, colHinge, colHinge);
+
+                        // 4. Latch edge (BL: c1, TL: c5, TR: c6, BR: c2)
+                        addOpaqueQuad(c1, c5, c6, c2, uvEdge, normLatch, colLatch, colLatch, colLatch, colLatch);
+
+                        // 5. Top edge (only on upper half)
+                        if (isUpper) {
+                            addOpaqueQuad(c4, c7, c6, c5, uvEdgeCap, glm::vec3(0, 1, 0), colTop, colTop, colTop, colTop);
+                        }
+
+                        // 6. Bottom edge (only on lower half)
+                        if (!isUpper) {
+                            addOpaqueQuad(c0, c1, c2, c3, uvEdgeCap, glm::vec3(0, -1, 0), colBot, colBot, colBot, colBot);
+                        }
+
+                        continue;
+                    }
+
+                    // 1d. True 3D Bed Model (4-Cell Architecture: 2 Columns = 4 Prisms)
+                    // Head column (s=0, s=1) and Foot column (s=0, s=1)
+                    if (cell.isBed()) {
+                        // To avoid duplicate mesh, each column is meshed only once when s == 0
+                        if (s == 1) continue;
+
+                        bool isHead = cell.isBedHead();
+                        uint8_t facing = cell.getBedFacing(); // 0: +X, 1: -X, 2: +Z, 3: -Z
+
+                        float x0 = static_cast<float>(wx) + getRowXOffset(wz);
+                        float z0 = static_cast<float>(wz) * TRI_HEIGHT;
+                        float z1 = static_cast<float>(wz + 1) * TRI_HEIGHT;
+
+                        // 4 Outer corners of the column rhombus: V0(SW), V1(SE), V2(NE), V3(NW)
+                        glm::vec2 V0(x0, z0);
+                        glm::vec2 V1(x0 + 1.0f, z0);
+                        glm::vec2 V2(x0 + 1.5f, z1);
+                        glm::vec2 V3(x0 + 0.5f, z1);
+
+                        glm::vec2 P_center = (V0 + V2) * 0.5f;
+
+                        // Exact column corners with NO shrink on the joint seam, eliminating any gap between Head and Foot
+                        glm::vec2 C0 = V0;
+                        glm::vec2 C1 = V1;
+                        glm::vec2 C2 = V2;
+                        glm::vec2 C3 = V3;
+
+                        // Identify the 4 ordered corners of this bed half in CCW order:
+                        // P_end0 -> P_end1 (Outer end: Headboard or Footboard)
+                        // P_end1 -> P_seam1 (Right side skirt)
+                        // P_seam1 -> P_seam0 (Internal seam joining the other half)
+                        // P_seam0 -> P_end0 (Left side skirt)
+                        glm::vec2 P_end0, P_end1, P_seam1, P_seam0;
+
+                        if (facing == 0) { // +X
+                            if (isHead) { P_end0 = C1; P_end1 = C2; P_seam1 = C3; P_seam0 = C0; }
+                            else        { P_end0 = C3; P_end1 = C0; P_seam1 = C1; P_seam0 = C2; }
+                        } else if (facing == 1) { // -X
+                            if (isHead) { P_end0 = C3; P_end1 = C0; P_seam1 = C1; P_seam0 = C2; }
+                            else        { P_end0 = C1; P_end1 = C2; P_seam1 = C3; P_seam0 = C0; }
+                        } else if (facing == 2) { // +Z
+                            if (isHead) { P_end0 = C2; P_end1 = C3; P_seam1 = C0; P_seam0 = C1; }
+                            else        { P_end0 = C0; P_end1 = C1; P_seam1 = C2; P_seam0 = C3; }
+                        } else { // -Z (3)
+                            if (isHead) { P_end0 = C0; P_end1 = C1; P_seam1 = C2; P_seam0 = C3; }
+                            else        { P_end0 = C2; P_end1 = C3; P_seam1 = C0; P_seam0 = C1; }
+                        }
+
+                        float py = static_cast<float>(y);
+                        float hLeg = 0.1875f; // 3/16 block legs
+                        float hBed = 0.50f;   // 8/16 block mattress top
+
+                        // Textures
+                        int tileTop  = isHead ? BlockRegistry::getTextureTile("bed_head_top") : BlockRegistry::getTextureTile("bed_foot_top");
+                        int tileSide = BlockRegistry::getTextureTile("bed_side");
+                        int tileEnd  = isHead ? BlockRegistry::getTextureTile("bed_head_end") : BlockRegistry::getTextureTile("bed_foot_end");
+                        if (tileTop < 0)  tileTop  = isHead ? TextureAtlas::TILE_BED_HEAD_TOP : TextureAtlas::TILE_BED_FOOT_TOP;
+                        if (tileSide < 0) tileSide = isHead ? TextureAtlas::TILE_BED_HEAD_SIDE : TextureAtlas::TILE_BED_FOOT_SIDE;
+                        if (tileEnd < 0)  tileEnd  = isHead ? TextureAtlas::TILE_BED_HEAD_END : TextureAtlas::TILE_BED_FOOT_END;
+
+                        int tileUnderside = BlockRegistry::getTextureTile("bed_underside");
+                        if (tileUnderside < 0) tileUnderside = 4; // Oak Planks fallback
+                        glm::vec4 uvUnderside = TextureAtlas::getTileUV(tileUnderside);
+
+                        int tileLeg = BlockRegistry::getTextureTile("bed_leg");
+                        if (tileLeg < 0) tileLeg = tileUnderside;
+                        glm::vec4 uvLeg = TextureAtlas::getTileUV(tileLeg);
+
+                        int tileLegBot = BlockRegistry::getTextureTile("bed_leg_bottom");
+                        if (tileLegBot < 0) tileLegBot = tileLeg;
+                        glm::vec4 uvLegBot = TextureAtlas::getTileUV(tileLegBot);
+
+                        glm::vec4 uvTop  = TextureAtlas::getTileUV(tileTop);
+                        glm::vec4 uvSide = TextureAtlas::getTileUV(tileSide);
+                        glm::vec4 uvEnd  = TextureAtlas::getTileUV(tileEnd);
+
+                        // 3D Positions for mattress top (T) and bottom (B)
+                        glm::vec3 T_end0(P_end0.x, py + hBed, P_end0.y);
+                        glm::vec3 T_end1(P_end1.x, py + hBed, P_end1.y);
+                        glm::vec3 T_seam1(P_seam1.x, py + hBed, P_seam1.y);
+                        glm::vec3 T_seam0(P_seam0.x, py + hBed, P_seam0.y);
+
+                        glm::vec3 B_end0(P_end0.x, py + hLeg, P_end0.y);
+                        glm::vec3 B_end1(P_end1.x, py + hLeg, P_end1.y);
+                        glm::vec3 B_seam1(P_seam1.x, py + hLeg, P_seam1.y);
+                        glm::vec3 B_seam0(P_seam0.x, py + hLeg, P_seam0.y);
+
+                        auto [sTop, tTop] = getVertexLight((T_end0 + T_end1 + T_seam1 + T_seam0) * 0.25f, glm::vec3(0, 1, 0));
+                        glm::vec3 colTop(sTop, 1.0f, tTop);
+
+                        auto [sBot, tBot] = getVertexLight((B_end0 + B_end1 + B_seam1 + B_seam0) * 0.25f, glm::vec3(0, -1, 0));
+                        glm::vec3 colBot(sBot, 1.0f, tBot);
+
+                        // 1. Mattress Top Quad
+                        glm::vec2 uvE0(uvTop.x, uvTop.y);
+                        glm::vec2 uvE1(uvTop.z, uvTop.y);
+                        glm::vec2 uvS1(uvTop.z, uvTop.w);
+                        glm::vec2 uvS0(uvTop.x, uvTop.w);
+
+                        if (!isHead) {
+                            std::swap(uvE0, uvS0);
+                            std::swap(uvE1, uvS1);
+                        }
+
+                        addOpaqueTri(T_end0, T_seam1, T_end1, uvE0, uvS1, uvE1, glm::vec3(0, 1, 0), colTop, colTop, colTop);
+                        addOpaqueTri(T_end0, T_seam0, T_seam1, uvE0, uvS0, uvS1, glm::vec3(0, 1, 0), colTop, colTop, colTop);
+
+                        // 2. Underside Quad (Bed Underside Planks)
+                        glm::vec2 uvU0(uvUnderside.x, uvUnderside.y);
+                        glm::vec2 uvU1(uvUnderside.z, uvUnderside.y);
+                        glm::vec2 uvU2(uvUnderside.z, uvUnderside.w);
+                        glm::vec2 uvU3(uvUnderside.x, uvUnderside.w);
+                        addOpaqueTri(B_end0, B_end1, B_seam1, uvU0, uvU1, uvU2, glm::vec3(0, -1, 0), colBot, colBot, colBot);
+                        addOpaqueTri(B_end0, B_seam1, B_seam0, uvU0, uvU2, uvU3, glm::vec3(0, -1, 0), colBot, colBot, colBot);
+
+                        // 3. Board face (Headboard on Head, Footboard on Foot)
+                        glm::vec2 eEnd = glm::normalize(P_end1 - P_end0);
+                        glm::vec3 nEnd(eEnd.y, 0.0f, -eEnd.x);
+                        if (glm::dot(glm::vec2(nEnd.x, nEnd.z), P_end0 - P_center) < 0.0f) nEnd = -nEnd;
+                        auto [sE, tE] = getVertexLight((B_end0 + T_end0 + T_end1 + B_end1) * 0.25f, nEnd);
+                        glm::vec3 colEnd(sE, 1.0f, tE);
+                        addOpaqueQuad(B_end0, T_end0, T_end1, B_end1, uvEnd, nEnd, colEnd, colEnd, colEnd, colEnd);
+
+                        // 4. Side Skirts
+                        glm::vec2 eSide1 = glm::normalize(P_seam1 - P_end1);
+                        glm::vec3 nSide1(eSide1.y, 0.0f, -eSide1.x);
+                        if (glm::dot(glm::vec2(nSide1.x, nSide1.z), P_end1 - P_center) < 0.0f) nSide1 = -nSide1;
+                        auto [sS1, tS1] = getVertexLight((B_end1 + T_end1 + T_seam1 + B_seam1) * 0.25f, nSide1);
+                        glm::vec3 colSide1(sS1, 1.0f, tS1);
+                        addOpaqueQuad(B_end1, T_end1, T_seam1, B_seam1, uvSide, nSide1, colSide1, colSide1, colSide1, colSide1);
+
+                        glm::vec2 eSide0 = glm::normalize(P_end0 - P_seam0);
+                        glm::vec3 nSide0(eSide0.y, 0.0f, -eSide0.x);
+                        if (glm::dot(glm::vec2(nSide0.x, nSide0.z), P_seam0 - P_center) < 0.0f) nSide0 = -nSide0;
+                        auto [sS0, tS0] = getVertexLight((B_seam0 + T_seam0 + T_end0 + B_end0) * 0.25f, nSide0);
+                        glm::vec3 colSide0(sS0, 1.0f, tS0);
+                        addOpaqueQuad(B_seam0, T_seam0, T_end0, B_end0, uvSide, nSide0, colSide0, colSide0, colSide0, colSide0);
+
+                        // 5. Sturdy 3D Corner Legs (3x3 pixels / 0.1875m wide orthogonal square cuboid posts flush with outer edges)
+                        float legW = 0.1875f;
+                        float legD = 0.1875f;
+                        glm::vec3 colLeg = colBot * 0.90f;
+
+                        // Unit vector along the outer end board (from P_end0 towards P_end1)
+                        glm::vec2 uEnd = glm::normalize(P_end1 - P_end0);
+                        // Unit vector pointing inward into the bed, perpendicular to uEnd
+                        glm::vec2 uIn(-uEnd.y, uEnd.x);
+                        if (glm::dot(uIn, P_center - P_end0) < 0.0f) {
+                            uIn = -uIn;
+                        }
+
+                        auto buildAndAddLeg = [&](const glm::vec2& corner, const glm::vec2& dEnd, const glm::vec2& dLen) {
+                            glm::vec2 c0 = corner;
+                            glm::vec2 c1 = corner + dEnd;
+                            glm::vec2 c2 = corner + dEnd + dLen;
+                            glm::vec2 c3 = corner + dLen;
+
+                            // Ensure strict CCW ordering in XZ (looking from above): cross product of (c1-c0) and (c3-c0) > 0
+                            float k = (c1.x - c0.x) * (c3.y - c0.y) - (c1.y - c0.y) * (c3.x - c0.x);
+                            std::array<glm::vec2, 4> pts = (k > 0.0f) ? std::array<glm::vec2, 4>{c0, c1, c2, c3}
+                                                                      : std::array<glm::vec2, 4>{c0, c3, c2, c1};
+
+                            // 4 Vertical outward-facing walls with correct CCW winding and outward normals
+                            for (int i = 0; i < 4; ++i) {
+                                const glm::vec2& pL = pts[i];
+                                const glm::vec2& pR = pts[(i + 1) % 4];
+                                glm::vec3 bL(pL.x, py, pL.y);
+                                glm::vec3 tL(pL.x, py + hLeg, pL.y);
+                                glm::vec3 tR(pR.x, py + hLeg, pR.y);
+                                glm::vec3 bR(pR.x, py, pR.y);
+                                glm::vec2 e = pR - pL;
+                                glm::vec3 nOut = glm::normalize(glm::vec3(e.y, 0.0f, -e.x));
+                                addOpaqueQuad(bL, tL, tR, bR, uvLeg, nOut, colLeg, colLeg, colLeg, colLeg);
+                            }
+
+                            // Bottom cap facing down (-Y, CCW when viewed from below)
+                            glm::vec3 v0(pts[0].x, py, pts[0].y);
+                            glm::vec3 v1(pts[1].x, py, pts[1].y);
+                            glm::vec3 v2(pts[2].x, py, pts[2].y);
+                            glm::vec3 v3(pts[3].x, py, pts[3].y);
+                            glm::vec2 uvLB0(uvLegBot.x, uvLegBot.y);
+                            glm::vec2 uvLB1(uvLegBot.z, uvLegBot.y);
+                            glm::vec2 uvLB2(uvLegBot.z, uvLegBot.w);
+                            glm::vec2 uvLB3(uvLegBot.x, uvLegBot.w);
+                            addOpaqueTri(v0, v3, v2, uvLB0, uvLB3, uvLB2, glm::vec3(0.0f, -1.0f, 0.0f), colLeg, colLeg, colLeg);
+                            addOpaqueTri(v0, v2, v1, uvLB0, uvLB2, uvLB1, glm::vec3(0.0f, -1.0f, 0.0f), colLeg, colLeg, colLeg);
+                        };
+
+                        // Leg at corner P_end0: extends +uEnd * legW, +uIn * legD
+                        buildAndAddLeg(P_end0, uEnd * legW, uIn * legD);
+                        // Leg at corner P_end1: extends -uEnd * legW, +uIn * legD
+                        buildAndAddLeg(P_end1, -uEnd * legW, uIn * legD);
+
+                        continue;
+                    }
+
+                    // 1e. True 3D Cake Model (Partial-height triangular prism)
+                    if (cell.type == BlockType::Cake) {
+                        glm::vec2 vXZ[3];
+                        getPrismVerticesXZ(wx, wz, s, vXZ);
+
+                        glm::vec2 cent = (vXZ[0] + vXZ[1] + vXZ[2]) / 3.0f;
+                        float shrink = 0.06f; // 1 pixel inset from edges
+                        glm::vec2 c0 = vXZ[0] + glm::normalize(cent - vXZ[0]) * shrink;
+                        glm::vec2 c1 = vXZ[1] + glm::normalize(cent - vXZ[1]) * shrink;
+                        glm::vec2 c2 = vXZ[2] + glm::normalize(cent - vXZ[2]) * shrink;
+
+                        float py = static_cast<float>(y);
+                        float hCake = 0.4375f; // 7/16 block height
+
+                        glm::vec3 B0(c0.x, py, c0.y);
+                        glm::vec3 B1(c1.x, py, c1.y);
+                        glm::vec3 B2(c2.x, py, c2.y);
+
+                        glm::vec3 T0(c0.x, py + hCake, c0.y);
+                        glm::vec3 T1(c1.x, py + hCake, c1.y);
+                        glm::vec3 T2(c2.x, py + hCake, c2.y);
+
+                        glm::vec4 uvTop = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(cell.type, 0));
+                        glm::vec4 uvBot = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(cell.type, 1));
+                        glm::vec4 uvSide = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(cell.type, 2));
+
+                        glm::vec2 uvTop0, uvTop1, uvTop2;
+                        if (s == 0) {
+                            uvTop0 = glm::vec2(uvTop.x, uvTop.y);
+                            uvTop1 = glm::vec2(uvTop.z, uvTop.y);
+                            uvTop2 = glm::vec2(uvTop.x, uvTop.w);
+                        } else {
+                            uvTop0 = glm::vec2(uvTop.z, uvTop.y);
+                            uvTop1 = glm::vec2(uvTop.z, uvTop.w);
+                            uvTop2 = glm::vec2(uvTop.x, uvTop.w);
+                        }
+
+                        glm::vec2 uvBot0, uvBot1, uvBot2;
+                        if (s == 0) {
+                            uvBot0 = glm::vec2(uvBot.x, uvBot.y);
+                            uvBot1 = glm::vec2(uvBot.z, uvBot.y);
+                            uvBot2 = glm::vec2(uvBot.x, uvBot.w);
+                        } else {
+                            uvBot0 = glm::vec2(uvBot.z, uvBot.y);
+                            uvBot1 = glm::vec2(uvBot.z, uvBot.w);
+                            uvBot2 = glm::vec2(uvBot.x, uvBot.w);
+                        }
+
+                        // Top frosting face (CCW winding: T0, T2, T1)
+                        auto [sT, tT] = getVertexLight((T0 + T1 + T2) / 3.0f, nTop);
+                        glm::vec3 colTop(sT, 1.0f, tT);
+                        addOpaqueTri(T0, T2, T1, uvTop0, uvTop2, uvTop1, nTop, colTop, colTop, colTop);
+
+                        // Bottom sponge face (CCW winding: B0, B1, B2)
+                        auto [sB, tB] = getVertexLight((B0 + B1 + B2) / 3.0f, nBot);
+                        glm::vec3 colBot(sB, 1.0f, tB);
+                        addOpaqueTri(B0, B1, B2, uvBot0, uvBot1, uvBot2, nBot, colBot, colBot, colBot);
+
+                        // 3 side walls
+                        glm::vec2 e0 = c1 - c0;
+                        glm::vec3 n0 = glm::normalize(glm::vec3(e0.y, 0.0f, -e0.x));
+                        auto [s0, t0] = getVertexLight((B0 + B1 + T1 + T0) * 0.25f, n0);
+                        glm::vec3 cSide0(s0, 1.0f, t0);
+                        addOpaqueQuad(B0, B1, T1, T0, uvSide, n0, cSide0, cSide0, cSide0, cSide0);
+
+                        glm::vec2 e1 = c2 - c1;
+                        glm::vec3 n1 = glm::normalize(glm::vec3(e1.y, 0.0f, -e1.x));
+                        auto [s1, t1] = getVertexLight((B1 + B2 + T2 + T1) * 0.25f, n1);
+                        glm::vec3 cSide1(s1, 1.0f, t1);
+                        addOpaqueQuad(B1, B2, T2, T1, uvSide, n1, cSide1, cSide1, cSide1, cSide1);
+
+                        glm::vec2 e2 = c0 - c2;
+                        glm::vec3 n2 = glm::normalize(glm::vec3(e2.y, 0.0f, -e2.x));
+                        auto [s2, t2] = getVertexLight((B2 + B0 + T0 + T2) * 0.25f, n2);
+                        glm::vec3 cSide2(s2, 1.0f, t2);
+                        addOpaqueQuad(B2, B0, T0, T2, uvSide, n2, cSide2, cSide2, cSide2, cSide2);
+
+                        continue;
+                    }
+
+                    // 1f. True 3D Cactus Model (14x14 proportions, inset by 0.0625m, seamless column join)
+                    if (cell.isCactus()) {
+                        float x0 = static_cast<float>(wx) + getRowXOffset(wz);
+                        float z0 = static_cast<float>(wz) * TRI_HEIGHT;
+                        float z1 = static_cast<float>(wz + 1) * TRI_HEIGHT;
+
+                        glm::vec2 V0(x0, z0);
+                        glm::vec2 V1(x0 + 1.0f, z0);
+                        glm::vec2 V2(x0 + 1.5f, z1);
+                        glm::vec2 V3(x0 + 0.5f, z1);
+
+                        glm::vec2 P_cent = (V0 + V2) * 0.5f;
+                        float d = 0.0625f; // 1/16 block inset
+
+                        // Corner insets: acute corners inset along bisector by 2d, obtuse corners by d / sin(60)
+                        glm::vec2 C0 = V0 + glm::normalize(P_cent - V0) * (2.0f * d);
+                        glm::vec2 C2 = V2 + glm::normalize(P_cent - V2) * (2.0f * d);
+                        glm::vec2 C1 = V1 + glm::normalize(P_cent - V1) * (d / SQRT_3_OVER_2);
+                        glm::vec2 C3 = V3 + glm::normalize(P_cent - V3) * (d / SQRT_3_OVER_2);
+
+                        glm::vec2 cXZ[3];
+                        if (s == 0) {
+                            cXZ[0] = C0; cXZ[1] = C1; cXZ[2] = C3;
+                        } else {
+                            cXZ[0] = C1; cXZ[1] = C2; cXZ[2] = C3;
+                        }
+
+                        float py = static_cast<float>(y);
+                        glm::vec3 B0(cXZ[0].x, py, cXZ[0].y);
+                        glm::vec3 B1(cXZ[1].x, py, cXZ[1].y);
+                        glm::vec3 B2(cXZ[2].x, py, cXZ[2].y);
+
+                        glm::vec3 T0(cXZ[0].x, py + 1.0f, cXZ[0].y);
+                        glm::vec3 T1(cXZ[1].x, py + 1.0f, cXZ[1].y);
+                        glm::vec3 T2(cXZ[2].x, py + 1.0f, cXZ[2].y);
+
+                        int tileTop  = TextureAtlas::getTileForBlock(cell.type, 0); // Cactus Top
+                        int tileBot  = TextureAtlas::getTileForBlock(cell.type, 1); // Cactus Bottom
+                        int tileSide = TextureAtlas::getTileForBlock(cell.type, 2); // Cactus Side
+
+                        glm::vec4 uvTopRaw = TextureAtlas::getTileUV(tileTop);
+                        glm::vec4 uvBotRaw = TextureAtlas::getTileUV(tileBot);
+                        glm::vec4 uvSideRaw = TextureAtlas::getTileUV(tileSide);
+
+                        // Sample inner [1/16, 15/16] to strictly avoid the 1-pixel transparent border
+                        float uScale = uvTopRaw.z - uvTopRaw.x;
+                        float vScale = uvTopRaw.w - uvTopRaw.y;
+                        float uMin = uvTopRaw.x + uScale * (1.0f / 16.0f);
+                        float uMax = uvTopRaw.x + uScale * (15.0f / 16.0f);
+                        float vMin = uvTopRaw.y + vScale * (1.0f / 16.0f);
+                        float vMax = uvTopRaw.y + vScale * (15.0f / 16.0f);
+
+                        // Side faces: horizontally crop [1/16, 15/16] to match 14x14 geometry and eliminate transparent edge gaps
+                        float uSideSpan = uvSideRaw.z - uvSideRaw.x;
+                        glm::vec4 uvSideCropped(
+                            uvSideRaw.x + uSideSpan * (1.0f / 16.0f),
+                            uvSideRaw.y,
+                            uvSideRaw.x + uSideSpan * (15.0f / 16.0f),
+                            uvSideRaw.w
+                        );
+
+                        glm::vec2 uvT0, uvT1, uvT2;
+                        glm::vec2 uvB0, uvB1, uvB2;
+                        if (s == 0) {
+                            // Up-pointing triangle: (uMin, vMin), (uMax, vMin), (uMin, vMax)
+                            uvT0 = glm::vec2(uMin, vMin);
+                            uvT1 = glm::vec2(uMax, vMin);
+                            uvT2 = glm::vec2(uMin, vMax);
+
+                            uvB0 = uvT0;
+                            uvB1 = uvT1;
+                            uvB2 = uvT2;
+                        } else {
+                            // Down-pointing triangle: (uMax, vMin), (uMax, vMax), (uMin, vMax)
+                            uvT0 = glm::vec2(uMax, vMin);
+                            uvT1 = glm::vec2(uMax, vMax);
+                            uvT2 = glm::vec2(uMin, vMax);
+
+                            uvB0 = uvT0;
+                            uvB1 = uvT1;
+                            uvB2 = uvT2;
+                        }
+
+                        CellCoord nbrs[5];
+                        getNeighbors(wx, y, wz, s, nbrs);
+
+                        // Top face (only if block above is not cactus)
+                        Cell cellAbove = getCellAtWorld(nbrs[0].x, nbrs[0].y, nbrs[0].z, nbrs[0].s);
+                        if (!cellAbove.isCactus()) {
+                            auto [sT, tT] = getVertexLight((T0 + T1 + T2) / 3.0f, nTop);
+                            glm::vec3 colTop(sT, 1.0f, tT);
+                            addOpaqueTri(T0, T2, T1, uvT0, uvT2, uvT1, nTop, colTop, colTop, colTop);
+                        }
+
+                        // Bottom face (only if block below is not cactus)
+                        Cell cellBelow = getCellAtWorld(nbrs[1].x, nbrs[1].y, nbrs[1].z, nbrs[1].s);
+                        if (!cellBelow.isCactus()) {
+                            auto [sB, tB] = getVertexLight((B0 + B1 + B2) / 3.0f, nBot);
+                            glm::vec3 colBot(sB, 1.0f, tB);
+                            addOpaqueTri(B0, B1, B2, uvB0, uvB1, uvB2, nBot, colBot, colBot, colBot);
+                        }
+
+                        // 3 Lateral faces (Upright quad order: BL=B_i, TL=T_i, TR=T_{i+1}, BR=B_{i+1}):
+                        // For s=0:
+                        // Edge 0: C0->C1 (Base wall, nbrs[2])
+                        // Edge 1: C1->C3 (Hypotenuse seam, nbrs[4])
+                        // Edge 2: C3->C0 (Left slanted wall, nbrs[3])
+                        // For s=1:
+                        // Edge 0: C1->C2 (Right slanted wall, nbrs[4])
+                        // Edge 1: C2->C3 (Base wall, nbrs[2])
+                        // Edge 2: C3->C1 (Hypotenuse seam, nbrs[3])
+
+                        int nbrEdge0 = (s == 0) ? 2 : 4;
+                        int nbrEdge1 = (s == 0) ? 4 : 2;
+                        int nbrEdge2 = 3;
+
+                        Cell n0Cell = getCellAtWorld(nbrs[nbrEdge0].x, nbrs[nbrEdge0].y, nbrs[nbrEdge0].z, nbrs[nbrEdge0].s);
+                        if (!n0Cell.isCactus()) {
+                            glm::vec2 e0 = cXZ[1] - cXZ[0];
+                            glm::vec3 n0 = glm::normalize(glm::vec3(e0.y, 0.0f, -e0.x));
+                            auto [s0, t0] = getVertexLight((B0 + B1 + T1 + T0) * 0.25f, n0);
+                            glm::vec3 col0(s0, 1.0f, t0);
+                            addOpaqueQuad(B0, T0, T1, B1, uvSideCropped, n0, col0, col0, col0, col0);
+                        }
+
+                        Cell n1Cell = getCellAtWorld(nbrs[nbrEdge1].x, nbrs[nbrEdge1].y, nbrs[nbrEdge1].z, nbrs[nbrEdge1].s);
+                        if (!n1Cell.isCactus()) {
+                            glm::vec2 e1 = cXZ[2] - cXZ[1];
+                            glm::vec3 n1 = glm::normalize(glm::vec3(e1.y, 0.0f, -e1.x));
+                            auto [s1, t1] = getVertexLight((B1 + B2 + T2 + T1) * 0.25f, n1);
+                            glm::vec3 col1(s1, 1.0f, t1);
+                            addOpaqueQuad(B1, T1, T2, B2, uvSideCropped, n1, col1, col1, col1, col1);
+                        }
+
+                        Cell n2Cell = getCellAtWorld(nbrs[nbrEdge2].x, nbrs[nbrEdge2].y, nbrs[nbrEdge2].z, nbrs[nbrEdge2].s);
+                        if (!n2Cell.isCactus()) {
+                            glm::vec2 e2 = cXZ[0] - cXZ[2];
+                            glm::vec3 n2 = glm::normalize(glm::vec3(e2.y, 0.0f, -e2.x));
+                            auto [s2, t2] = getVertexLight((B2 + B0 + T0 + T2) * 0.25f, n2);
+                            glm::vec3 col2(s2, 1.0f, t2);
+                            addOpaqueQuad(B2, T2, T0, B0, uvSideCropped, n2, col2, col2, col2, col2);
+                        }
+
                         continue;
                     }
 
@@ -497,16 +1429,17 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                     Cell n0 = getCellAtWorld(neighbors[0].x, neighbors[0].y, neighbors[0].z, neighbors[0].s);
                     if (shouldDrawFace(cell, n0)) {
                         glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(cell.type, 0));
-                        float uMid = uv.x + (uv.z - uv.x) * 0.5f;
                         glm::vec2 uvT0, uvT1, uvT2;
                         if (s == 0) {
-                            uvT0 = glm::vec2(uv.x, uv.w);
-                            uvT1 = glm::vec2(uv.z, uv.w);
-                            uvT2 = glm::vec2(uMid, uv.y);
-                        } else {
-                            uvT0 = glm::vec2(uMid, uv.w);
+                            // Up-pointing triangle: (0,0), (1,0), (0,1)
+                            uvT0 = glm::vec2(uv.x, uv.y);
                             uvT1 = glm::vec2(uv.z, uv.y);
-                            uvT2 = glm::vec2(uv.x, uv.y);
+                            uvT2 = glm::vec2(uv.x, uv.w);
+                        } else {
+                            // Down-pointing triangle: (1,0), (1,1), (0,1)
+                            uvT0 = glm::vec2(uv.z, uv.y);
+                            uvT1 = glm::vec2(uv.z, uv.w);
+                            uvT2 = glm::vec2(uv.x, uv.w);
                         }
 
                         auto [sun0, t0] = getVertexLight(T0, nTop);
@@ -542,7 +1475,7 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                             glm::vec3 c1(sun1, 1.0f * ao1, isSubmerged ? (t1 + 2.0f) : t1);
                             glm::vec3 c2(sun2, 1.0f * ao2, isSubmerged ? (t2 + 2.0f) : t2);
 
-                            addOpaqueTri(T0, T2, T1, uvT0, uvT2, uvT1, nTop, c0, c2, c1);
+                            addOpaqueTri(T0, T2, T1, uvT0, uvT2, uvT1, cell.isLeaves() ? (nTop * 1.4f) : nTop, c0, c2, c1);
                         }
                     }
 
@@ -551,17 +1484,18 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                     // ---------------------------------------------------------
                     Cell n1 = getCellAtWorld(neighbors[1].x, neighbors[1].y, neighbors[1].z, neighbors[1].s);
                     if (shouldDrawFace(cell, n1)) {
-                        glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(cell.type, 0));
-                        float uMidB = uv.x + (uv.z - uv.x) * 0.5f;
+                        glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(cell.type, 1));
                         glm::vec2 uvB0, uvB1, uvB2;
                         if (s == 0) {
-                            uvB0 = glm::vec2(uv.x, uv.w);
-                            uvB1 = glm::vec2(uv.z, uv.w);
-                            uvB2 = glm::vec2(uMidB, uv.y);
-                        } else {
-                            uvB0 = glm::vec2(uMidB, uv.w);
+                            // Up-pointing triangle: (0,0), (1,0), (0,1)
+                            uvB0 = glm::vec2(uv.x, uv.y);
                             uvB1 = glm::vec2(uv.z, uv.y);
-                            uvB2 = glm::vec2(uv.x, uv.y);
+                            uvB2 = glm::vec2(uv.x, uv.w);
+                        } else {
+                            // Down-pointing triangle: (1,0), (1,1), (0,1)
+                            uvB0 = glm::vec2(uv.z, uv.y);
+                            uvB1 = glm::vec2(uv.z, uv.w);
+                            uvB2 = glm::vec2(uv.x, uv.w);
                         }
 
                         auto [sun0, t0] = getVertexLight(B0, nBot);
@@ -586,7 +1520,7 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                             glm::vec3 c1(sun1, ao1, isSubmerged ? (t1 + 2.0f) : t1);
                             glm::vec3 c2(sun2, ao2, isSubmerged ? (t2 + 2.0f) : t2);
 
-                            addOpaqueTri(B0, B1, B2, uvB0, uvB1, uvB2, nBot, c0, c1, c2);
+                            addOpaqueTri(B0, B1, B2, uvB0, uvB1, uvB2, cell.isLeaves() ? (nBot * 1.4f) : nBot, c0, c1, c2);
                         }
                     }
 
@@ -635,7 +1569,7 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                             glm::vec3 c_T1(sun_T1, ao_T1, isSubmerged ? (t_T1 + 2.0f) : t_T1);
                             glm::vec3 c_B1(sun_B1, ao_B1, isSubmerged ? (t_B1 + 2.0f) : t_B1);
 
-                            addOpaqueQuad(vB0, vT0, vT1, vB1, uv, wallNorm, c_B0, c_T0, c_T1, c_B1);
+                            addOpaqueQuad(vB0, vT0, vT1, vB1, uv, cell.isLeaves() ? (wallNorm * 1.4f) : wallNorm, c_B0, c_T0, c_T1, c_B1);
                         }
                     };
 
@@ -861,16 +1795,17 @@ ChunkMesh ChunkMesher::generateLODMesh(const Chunk& chunk, LODLevel lod) {
                 glm::vec3 T2(vXZ[2].x, waterY + 0.90f, vXZ[2].y);
 
                 glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(BlockType::Water, 0));
-                float uMid = uv.x + (uv.z - uv.x) * 0.5f;
                 glm::vec2 uvT0, uvT1, uvT2;
                 if (s == 0) {
-                    uvT0 = glm::vec2(uv.x, uv.w);
-                    uvT1 = glm::vec2(uv.z, uv.w);
-                    uvT2 = glm::vec2(uMid, uv.y);
-                } else {
-                    uvT0 = glm::vec2(uMid, uv.w);
+                    // Up-pointing triangle: (0,0), (1,0), (0,1)
+                    uvT0 = glm::vec2(uv.x, uv.y);
                     uvT1 = glm::vec2(uv.z, uv.y);
-                    uvT2 = glm::vec2(uv.x, uv.y);
+                    uvT2 = glm::vec2(uv.x, uv.w);
+                } else {
+                    // Down-pointing triangle: (1,0), (1,1), (0,1)
+                    uvT0 = glm::vec2(uv.z, uv.y);
+                    uvT1 = glm::vec2(uv.z, uv.w);
+                    uvT2 = glm::vec2(uv.x, uv.w);
                 }
 
                 float depthFactor = 0.65f;
@@ -958,7 +1893,7 @@ ChunkMesh ChunkMesher::generateLODMesh(const Chunk& chunk, LODLevel lod) {
     return mesh;
 }
 
-ChunkMesh ChunkMesher::generateImposterMesh(const ChunkCoord& coord, const TerrainGen& terrainGen) {
+ChunkMesh ChunkMesher::generateImposterMesh(const ChunkCoord& coord, const TerrainGen& terrainGen, int step) {
     ChunkMesh mesh;
     int worldX = coord.cx * CHUNK_SIZE_X;
     int worldZ = coord.cz * CHUNK_SIZE_Z;
@@ -1008,7 +1943,6 @@ ChunkMesh ChunkMesher::generateImposterMesh(const ChunkCoord& coord, const Terra
     };
 
     const glm::vec3 nTop(0.0f, 1.0f, 0.0f);
-    const int step = 8; // 2x2 coarse cells per chunk
     const float fStep = static_cast<float>(step);
 
     int solidHeightGrid[16][16];
@@ -1021,8 +1955,9 @@ ChunkMesh ChunkMesher::generateImposterMesh(const ChunkCoord& coord, const Terra
             BlockType topType = BlockType::Air;
             bool hasWater = false;
 
-            for (int dx = 0; dx < step; ++dx) {
-                for (int dz = 0; dz < step; ++dz) {
+            int sampleStep = std::max(1, step / 2);
+            for (int dx = 0; dx < step; dx += sampleStep) {
+                for (int dz = 0; dz < step; dz += sampleStep) {
                     int wx = worldX + lx + dx;
                     int wz = worldZ + lz + dz;
                     int h = terrainGen.getHeight(wx, wz);
@@ -1031,10 +1966,8 @@ ChunkMesh ChunkMesher::generateImposterMesh(const ChunkCoord& coord, const Terra
                     }
                     if (h > topY) {
                         topY = h;
-                        if (h <= 44) topType = BlockType::Sand;
-                        else if (h <= 46) topType = BlockType::Sand;
-                        else if (h >= 74) topType = BlockType::Snow;
-                        else topType = BlockType::Grass;
+                        BiomeType b = terrainGen.getBiome(wx, wz);
+                        topType = getBiomeSurfaceBlock(b, h);
                     }
                 }
             }
@@ -1101,100 +2034,87 @@ ChunkMesh ChunkMesher::generateImposterMesh(const ChunkCoord& coord, const Terra
         }
     }
 
-    // B. Water Surface: Exact equilateral triangular mesh matching LOD0 and nearby chunks at Y = 45.0f
-    for (int clx = 0; clx < CHUNK_SIZE_X; ++clx) {
-        for (int clz = 0; clz < CHUNK_SIZE_Z; ++clz) {
-            int wx = worldX + clx;
-            int wz = worldZ + clz;
-            int h = terrainGen.getHeight(wx, wz);
-            if (h <= 44) {
-                for (int s = 0; s < 2; ++s) {
-                    glm::vec2 vXZ[3];
-                    getPrismVerticesXZ(wx, wz, s, vXZ);
+    // B. Water Surface: Macro water quad matching ocean surface at Y = 44.90f
+    for (int lx = 0; lx < CHUNK_SIZE_X; lx += step) {
+        for (int lz = 0; lz < CHUNK_SIZE_Z; lz += step) {
+            if (hasWaterGrid[lx][lz]) {
+                int wx = worldX + lx;
+                int wz = worldZ + lz;
+                float x0 = static_cast<float>(wx) + getRowXOffset(wz);
+                float x1 = x0 + fStep;
+                float z0 = static_cast<float>(wz) * TRI_HEIGHT;
+                float z1 = static_cast<float>(wz + step) * TRI_HEIGHT;
 
-                    float waterY = 44.0f;
-                    glm::vec3 T0(vXZ[0].x, waterY + 0.90f, vXZ[0].y);
-                    glm::vec3 T1(vXZ[1].x, waterY + 0.90f, vXZ[1].y);
-                    glm::vec3 T2(vXZ[2].x, waterY + 0.90f, vXZ[2].y);
+                glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(BlockType::Water, 0));
+                float waterY = 44.90f;
+                glm::vec3 v0(x0, waterY, z0);
+                glm::vec3 v1(x0, waterY, z1);
+                glm::vec3 v2(x1, waterY, z1);
+                glm::vec3 v3(x1, waterY, z0);
+                addWaterQuad(v0, v1, v2, v3, uv, nTop, glm::vec3(1.0f, 1.0f, 0.0f));
+            }
+        }
+    }
 
-                    glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(BlockType::Water, 0));
-                    float uMid = uv.x + (uv.z - uv.x) * 0.5f;
-                    glm::vec2 uvT0, uvT1, uvT2;
-                    if (s == 0) {
-                        uvT0 = glm::vec2(uv.x, uv.w);
-                        uvT1 = glm::vec2(uv.z, uv.w);
-                        uvT2 = glm::vec2(uMid, uv.y);
-                    } else {
-                        uvT0 = glm::vec2(uMid, uv.w);
-                        uvT1 = glm::vec2(uv.z, uv.y);
-                        uvT2 = glm::vec2(uv.x, uv.y);
-                    }
+    // 2. Internal Height Skirts between coarse cells for Solid Terrain (only when step < 16)
+    if (step < 16) {
+        // X boundary between (0, lz) and (step, lz)
+        for (int lz = 0; lz < CHUNK_SIZE_Z; lz += step) {
+            int yA = solidHeightGrid[0][lz];
+            int yB = solidHeightGrid[step][lz];
+            if (yA != yB) {
+                int wz = worldZ + lz;
+                float z0 = static_cast<float>(wz) * TRI_HEIGHT;
+                float z1 = static_cast<float>(wz + step) * TRI_HEIGHT;
+                float x1 = static_cast<float>(worldX) + getRowXOffset(wz) + fStep;
 
-                    float depthFactor = std::clamp((44.0f - static_cast<float>(h)) / 7.0f, 0.1f, 1.0f);
-                    glm::vec3 waterCol(depthFactor, 1.0f, 0.0f);
-                    addWaterTri(T0, T2, T1, uvT0, uvT2, uvT1, nTop, waterCol);
+                if (yA > yB) {
+                    BlockType bType = solidTypeGrid[0][lz];
+                    glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
+                    glm::vec3 v0(x1, static_cast<float>(yB) + 1.0f, z0);
+                    glm::vec3 v1(x1, static_cast<float>(yA) + 1.0f, z0);
+                    glm::vec3 v2(x1, static_cast<float>(yA) + 1.0f, z1);
+                    glm::vec3 v3(x1, static_cast<float>(yB) + 1.0f, z1);
+                    addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.72f, 0.0f));
+                } else {
+                    BlockType bType = solidTypeGrid[step][lz];
+                    glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
+                    glm::vec3 v0(x1, static_cast<float>(yA) + 1.0f, z1);
+                    glm::vec3 v1(x1, static_cast<float>(yB) + 1.0f, z1);
+                    glm::vec3 v2(x1, static_cast<float>(yB) + 1.0f, z0);
+                    glm::vec3 v3(x1, static_cast<float>(yA) + 1.0f, z0);
+                    addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.65f, 0.0f));
                 }
             }
         }
-    }
 
-    // 2. Internal Height Skirts between 8x8 coarse cells for Solid Terrain
-    // X boundary between (0, lz) and (8, lz)
-    for (int lz = 0; lz < CHUNK_SIZE_Z; lz += step) {
-        int yA = solidHeightGrid[0][lz];
-        int yB = solidHeightGrid[8][lz];
-        if (yA != yB) {
-            int wz = worldZ + lz;
-            float z0 = static_cast<float>(wz) * TRI_HEIGHT;
-            float z1 = static_cast<float>(wz + step) * TRI_HEIGHT;
-            float x1 = static_cast<float>(worldX) + getRowXOffset(wz) + fStep;
+        // Z boundary between (lx, 0) and (lx, step)
+        for (int lx = 0; lx < CHUNK_SIZE_X; lx += step) {
+            int yA = solidHeightGrid[lx][0];
+            int yC = solidHeightGrid[lx][step];
+            if (yA != yC) {
+                int wx = worldX + lx;
+                float x0 = static_cast<float>(wx) + getRowXOffset(worldZ);
+                float x1 = x0 + fStep;
+                float z1 = static_cast<float>(worldZ + step) * TRI_HEIGHT;
 
-            if (yA > yB) {
-                BlockType bType = solidTypeGrid[0][lz];
-                glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
-                glm::vec3 v0(x1, static_cast<float>(yB) + 1.0f, z0);
-                glm::vec3 v1(x1, static_cast<float>(yA) + 1.0f, z0);
-                glm::vec3 v2(x1, static_cast<float>(yA) + 1.0f, z1);
-                glm::vec3 v3(x1, static_cast<float>(yB) + 1.0f, z1);
-                addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.72f, 0.0f));
-            } else {
-                BlockType bType = solidTypeGrid[8][lz];
-                glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
-                glm::vec3 v0(x1, static_cast<float>(yA) + 1.0f, z1);
-                glm::vec3 v1(x1, static_cast<float>(yB) + 1.0f, z1);
-                glm::vec3 v2(x1, static_cast<float>(yB) + 1.0f, z0);
-                glm::vec3 v3(x1, static_cast<float>(yA) + 1.0f, z0);
-                addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(-1.0f, 0.0f, 0.0f), glm::vec3(1.0f, 0.65f, 0.0f));
-            }
-        }
-    }
-
-    // Z boundary between (lx, 0) and (lx, 8)
-    for (int lx = 0; lx < CHUNK_SIZE_X; lx += step) {
-        int yA = solidHeightGrid[lx][0];
-        int yC = solidHeightGrid[lx][8];
-        if (yA != yC) {
-            int wx = worldX + lx;
-            float x0 = static_cast<float>(wx) + getRowXOffset(worldZ);
-            float x1 = x0 + fStep;
-            float z1 = static_cast<float>(worldZ + step) * TRI_HEIGHT;
-
-            if (yA > yC) {
-                BlockType bType = solidTypeGrid[lx][0];
-                glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
-                glm::vec3 v0(x1, static_cast<float>(yC) + 1.0f, z1);
-                glm::vec3 v1(x1, static_cast<float>(yA) + 1.0f, z1);
-                glm::vec3 v2(x0, static_cast<float>(yA) + 1.0f, z1);
-                glm::vec3 v3(x0, static_cast<float>(yC) + 1.0f, z1);
-                addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
-            } else {
-                BlockType bType = solidTypeGrid[lx][8];
-                glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
-                glm::vec3 v0(x0, static_cast<float>(yA) + 1.0f, z1);
-                glm::vec3 v1(x0, static_cast<float>(yC) + 1.0f, z1);
-                glm::vec3 v2(x1, static_cast<float>(yC) + 1.0f, z1);
-                glm::vec3 v3(x1, static_cast<float>(yA) + 1.0f, z1);
-                addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
+                if (yA > yC) {
+                    BlockType bType = solidTypeGrid[lx][0];
+                    glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
+                    glm::vec3 v0(x1, static_cast<float>(yC) + 1.0f, z1);
+                    glm::vec3 v1(x1, static_cast<float>(yA) + 1.0f, z1);
+                    glm::vec3 v2(x0, static_cast<float>(yA) + 1.0f, z1);
+                    glm::vec3 v3(x0, static_cast<float>(yC) + 1.0f, z1);
+                    addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(0.0f, 0.0f, 1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
+                } else {
+                    BlockType bType = solidTypeGrid[lx][step];
+                    glm::vec4 sideUV = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(bType, 2));
+                    glm::vec3 v0(x0, static_cast<float>(yA) + 1.0f, z1);
+                    glm::vec3 v1(x0, static_cast<float>(yC) + 1.0f, z1);
+                    glm::vec3 v2(x1, static_cast<float>(yC) + 1.0f, z1);
+                    glm::vec3 v3(x1, static_cast<float>(yA) + 1.0f, z1);
+                    addOpaqueQuad(v0, v1, v2, v3, sideUV, glm::vec3(0.0f, 0.0f, -1.0f), glm::vec3(1.0f, 0.80f, 0.0f));
+                }
             }
         }
     }

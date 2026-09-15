@@ -11,10 +11,11 @@ struct ChunkCoord;
 enum class BlockType : uint8_t;
 
 enum class LODLevel : uint8_t {
-    LOD0_Full = 0,     // 0 - 16 chunks: full per-block detail, caves, foliage, AO
-    LOD1_Medium = 1,   // 16 - 48 chunks: 2x2 merged columns, surface shell + boundary skirts
-    LOD2_Coarse = 2,   // 48 - 96 chunks: 4x4 merged columns, coarse surface shell + boundary skirts
-    LOD3_Imposter = 3  // 96 - 256 chunks: procedural heightmap imposter
+    LOD0_Full = 0,     // 16x16: full per-block detail, caves, foliage, AO (0 - 8/16 chunks)
+    LOD1_Medium = 1,   // 8x8: 2x2 merged columns (step = 2)
+    LOD2_Coarse = 2,   // 4x4: 4x4 merged columns (step = 4)
+    LOD3_Imposter = 3, // 2x2: 8x8 merged columns (step = 8)
+    LOD4_Extreme = 4   // 1x1: 16x16 merged macro-voxel (step = 16, extreme horizons up to 256 chunks)
 };
 
 // Textured, lit vertex for world and model rendering
@@ -44,7 +45,7 @@ public:
 
     static ChunkMesh generateLODMesh(const Chunk& chunk, LODLevel lod);
 
-    static ChunkMesh generateImposterMesh(const ChunkCoord& coord, const TerrainGen& terrainGen);
+    static ChunkMesh generateImposterMesh(const ChunkCoord& coord, const TerrainGen& terrainGen, int step = 8);
 };
 
 } // namespace prismcraft

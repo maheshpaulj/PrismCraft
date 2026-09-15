@@ -29,7 +29,9 @@ public:
                 bool isChatOpen = false,
                 const std::string& chatInput = "",
                 const std::string& feedbackMsg = "",
-                float feedbackTimer = 0.0f);
+                float feedbackTimer = 0.0f,
+                VkDescriptorSet descSet = VK_NULL_HANDLE,
+                float sleepFadeAlpha = 0.0f);
 
 private:
     void buildCrosshairMesh();
@@ -37,7 +39,8 @@ private:
                          const Player& player, uint32_t screenWidth, uint32_t screenHeight, float fps,
                          const GameOptions& options, const World* world,
                          bool isChatOpen, const std::string& chatInput,
-                         const std::string& feedbackMsg, float feedbackTimer);
+                         const std::string& feedbackMsg, float feedbackTimer,
+                         float sleepFadeAlpha = 0.0f);
 
     VulkanContext& m_context;
     CommandQueue& m_cmdQueue;

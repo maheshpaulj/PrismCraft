@@ -22,6 +22,8 @@ public:
     [[nodiscard]] const glm::vec3& getVelocity() const { return m_velocity; }
     [[nodiscard]] bool isOnGround() const { return m_onGround; }
     [[nodiscard]] bool isFlying() const { return m_flying; }
+    [[nodiscard]] bool isCreative() const { return m_creative; }
+    void setCreative(bool c);
 
     // Health (0.0 to 20.0, 20 = 10 full hearts)
     [[nodiscard]] float getHealth() const { return m_health; }
@@ -53,6 +55,7 @@ public:
     void setSelectedSlot(int slot);
     [[nodiscard]] BlockType getSelectedBlock() const { return m_hotbar[m_selectedSlot]; }
     void setHotbarBlock(int slot, BlockType type, int count = 1);
+    [[nodiscard]] BlockType getHotbarBlock(int slot) const { return (slot >= 0 && slot < 10) ? m_hotbar[slot] : BlockType::Air; }
     [[nodiscard]] int getHotbarCount(int slot) const { return (slot >= 0 && slot < 10) ? m_hotbarCounts[slot] : 0; }
     [[nodiscard]] const std::array<BlockType, 10>& getHotbar() const { return m_hotbar; }
     [[nodiscard]] const std::array<int, 10>& getHotbarCounts() const { return m_hotbarCounts; }
@@ -81,6 +84,10 @@ public:
 
     void setPosition(const glm::vec3& pos);
     void respawn(const glm::vec3& groundPos);
+    [[nodiscard]] bool hasSpawnPoint() const { return m_hasSpawnPoint; }
+    [[nodiscard]] const glm::vec3& getSpawnPoint() const { return m_spawnPoint; }
+    void setSpawnPoint(const glm::vec3& p) { m_spawnPoint = p; m_hasSpawnPoint = true; }
+    void clearSpawnPoint() { m_hasSpawnPoint = false; }
     void toggleFlying();
     void setFlying(bool f) { m_flying = f; }
     [[nodiscard]] float getEyeHeight() const { return m_eyeHeight; }
@@ -96,9 +103,12 @@ private:
     Camera m_camera;
     glm::vec3 m_position;
     glm::vec3 m_velocity{0.0f};
+    bool m_hasSpawnPoint = false;
+    glm::vec3 m_spawnPoint{0.0f};
 
     bool m_onGround = false;
     bool m_flying = false;
+    bool m_creative = false;
     float m_health = 20.0f;
     float m_hunger = 20.0f;
     float m_armor = 0.0f;
@@ -131,20 +141,20 @@ private:
     bool m_drawingBow = false;
     bool m_blocking = false;
 
-    // Hotbar inventory (10 slots matching alternating triangular layout: 32x Wood, 8x Torch, 64x Glass)
+    // Hotbar inventory (10 slots: 32x Wood, 8x Torch, 64x Glass, 4x DoorWood, 2x Bed)
     std::array<BlockType, 10> m_hotbar{
         BlockType::Wood,
         BlockType::Torch,
         BlockType::Glass,
-        BlockType::Air,
-        BlockType::Air,
+        BlockType::DoorWood,
+        BlockType::Bed,
         BlockType::Air,
         BlockType::Air,
         BlockType::Air,
         BlockType::Air,
         BlockType::Air
     };
-    std::array<int, 10> m_hotbarCounts{32, 8, 64, 0, 0, 0, 0, 0, 0, 0};
+    std::array<int, 10> m_hotbarCounts{32, 8, 64, 4, 2, 0, 0, 0, 0, 0};
     int m_selectedSlot = 0;
 
     // Storage inventory (30 slots: empty by default for new world)

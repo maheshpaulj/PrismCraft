@@ -21,7 +21,14 @@ void ItemDropManager::spawnDrop(const glm::vec3& pos, BlockType type, const glm:
     if (type == BlockType::Air) return;
     ItemDrop drop;
     drop.pos = pos;
-    drop.vel = vel;
+    // Add small randomized horizontal drift if default upward velocity was passed
+    if (std::abs(vel.x) < 0.001f && std::abs(vel.z) < 0.001f && vel.y > 0.1f) {
+        float rx = ((rand() % 100) / 50.0f - 1.0f) * 0.35f;
+        float rz = ((rand() % 100) / 50.0f - 1.0f) * 0.35f;
+        drop.vel = glm::vec3(rx, vel.y, rz);
+    } else {
+        drop.vel = vel;
+    }
     drop.type = type;
     m_drops.push_back(drop);
 }
@@ -37,12 +44,39 @@ void ItemDropManager::update(float dt, const World& world, Player& player) {
         drop.vel.z *= std::max(0.0f, 1.0f - dt * 2.0f);
         drop.pos += drop.vel * dt;
 
-        float gy = world.getHighestSolidY(drop.pos.x, drop.pos.z);
-        drop.groundY = gy;
-        drop.inSunlight = (drop.pos.y >= gy - 0.2f);
-        if (drop.pos.y < gy + 0.15f) {
-            drop.pos.y = gy + 0.15f;
-            drop.vel = glm::vec3(0.0f);
+        CellCoord c = worldToCell(glm::vec3(drop.pos.x, 0.0f, drop.pos.z));
+
+        // 1. Ceiling collision: bounce down if colliding with solid block above when rising
+        if (drop.vel.y > 0.0f) {
+            int ceilY = static_cast<int>(std::floor(drop.pos.y + 0.25f));
+            if (ceilY < CHUNK_SIZE_Y) {
+                Cell ceilCell = world.getCell(c.x, ceilY, c.z, c.s);
+                if (ceilCell.isSolid()) {
+                    drop.pos.y = static_cast<float>(ceilY) - 0.26f;
+                    drop.vel.y = -0.4f; // bounce downwards
+                }
+            }
+        }
+
+        // 2. Floor collision: search strictly downwards from current item level
+        // Items will NEVER check blocks above them, preventing teleportation to tree canopies or cave roofs!
+        int checkStartY = std::clamp(static_cast<int>(std::floor(drop.pos.y)), 0, CHUNK_SIZE_Y - 1);
+        float localGroundY = 0.0f;
+        for (int y = checkStartY; y >= 0; --y) {
+            Cell cell = world.getCell(c.x, y, c.z, c.s);
+            if (cell.isSolid()) {
+                localGroundY = static_cast<float>(y + 1);
+                break;
+            }
+        }
+
+        drop.groundY = localGroundY;
+        float skyGroundY = world.getHighestSolidY(drop.pos.x, drop.pos.z);
+        drop.inSunlight = (drop.pos.y >= skyGroundY - 0.2f);
+
+        if (drop.pos.y < localGroundY + 0.15f) {
+            drop.pos.y = localGroundY + 0.15f;
+            drop.vel.y = 0.0f;
         }
 
         drop.age += dt;
@@ -109,6 +143,7 @@ void ItemDropManager::render(VkCommandBuffer cmd,
         vertices.push_back({v1, glm::vec2(uv.x, uv.y), norm, litCol});
         vertices.push_back({v2, glm::vec2(uv.z, uv.y), norm, litCol});
         vertices.push_back({v3, glm::vec2(uv.z, uv.w), norm, litCol});
+        // Outward-facing counter-clockwise winding (BL -> TL -> TR -> BR -> BL)
         indices.push_back(b + 0); indices.push_back(b + 1); indices.push_back(b + 2);
         indices.push_back(b + 2); indices.push_back(b + 3); indices.push_back(b + 0);
     };
@@ -146,15 +181,119 @@ void ItemDropManager::render(VkCommandBuffer cmd,
         indices.push_back(sb + 2); indices.push_back(sb + 3); indices.push_back(sb + 0);
 
         // 2. Render 3D Bobbing Drop Entity
-        glm::vec3 itemLitCol = (drop.type == BlockType::Torch)
+        glm::vec3 itemLitCol = Cell{drop.type}.isTorch()
             ? glm::vec3(1.0f, 1.0f, 1.0f) // Emissive torch flame glows in darkness
             : glm::vec3(drop.inSunlight ? 1.0f : 0.20f, 0.95f, 0.0f);
         
         glm::mat4 model = glm::translate(glm::mat4(1.0f), renderPos);
         model = glm::rotate(model, drop.rotAngle, glm::vec3(0.0f, 1.0f, 0.0f));
 
-        bool is2D = Cell{drop.type}.isItem() || Cell{drop.type}.isFoliage() || Cell{drop.type}.isTorch();
-        if (is2D) {
+        if (Cell{drop.type}.isTorch()) {
+            // 3D miniature standing/spinning torch cuboid
+            float hw = 0.026f;
+            float hTotal = 0.28f;
+            float yBase = -0.14f;
+            glm::vec4 uvTorch = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(drop.type, 0));
+            float uSpan = (uvTorch.z - uvTorch.x);
+            float vSpan = (uvTorch.w - uvTorch.y);
+
+            glm::vec4 uvSide(uvTorch.x + uSpan * (7.0f / 16.0f),
+                             uvTorch.y + vSpan * (6.0f / 16.0f),
+                             uvTorch.x + uSpan * (9.0f / 16.0f),
+                             uvTorch.w);
+            glm::vec4 uvTop(uvTorch.x + uSpan * (7.0f / 16.0f),
+                            uvTorch.y + vSpan * (6.0f / 16.0f),
+                            uvTorch.x + uSpan * (9.0f / 16.0f),
+                            uvTorch.y + vSpan * (8.0f / 16.0f));
+            glm::vec4 uvBot(uvTorch.x + uSpan * (7.0f / 16.0f),
+                            uvTorch.y + vSpan * (14.0f / 16.0f),
+                            uvTorch.x + uSpan * (9.0f / 16.0f),
+                            uvTorch.w);
+
+            auto xf = [&](const glm::vec3& p) { return glm::vec3(model * glm::vec4(p, 1.0f)); };
+            glm::vec3 flameCol(1.0f, 1.0f, 1.0f);
+            if (drop.type == BlockType::TorchSoul) {
+                flameCol = glm::vec3(0.3f, 0.95f, 1.0f);
+            } else if (drop.type == BlockType::TorchRedstone) {
+                flameCol = glm::vec3(1.0f, 0.2f, 0.2f);
+            }
+
+            // Bottom cap (-Y)
+            addQuad(xf({-hw, yBase, -hw}), xf({-hw, yBase,  hw}), xf({ hw, yBase,  hw}), xf({ hw, yBase, -hw}), uvBot, glm::vec3(model * glm::vec4(0, -1, 0, 0)), flameCol);
+            // Top cap (+Y)
+            addQuad(xf({-hw, yBase + hTotal,  hw}), xf({-hw, yBase + hTotal, -hw}), xf({ hw, yBase + hTotal, -hw}), xf({ hw, yBase + hTotal,  hw}), uvTop, glm::vec3(model * glm::vec4(0, 1, 0, 0)), flameCol);
+            // Front face (+Z)
+            addQuad(xf({ hw, yBase,  hw}), xf({ hw, yBase + hTotal,  hw}), xf({-hw, yBase + hTotal,  hw}), xf({-hw, yBase,  hw}), uvSide, glm::vec3(model * glm::vec4(0, 0, 1, 0)), flameCol);
+            // Back face (-Z)
+            addQuad(xf({-hw, yBase, -hw}), xf({-hw, yBase + hTotal, -hw}), xf({ hw, yBase + hTotal, -hw}), xf({ hw, yBase, -hw}), uvSide, glm::vec3(model * glm::vec4(0, 0, -1, 0)), flameCol);
+            // Right face (+X)
+            addQuad(xf({ hw, yBase, -hw}), xf({ hw, yBase + hTotal, -hw}), xf({ hw, yBase + hTotal,  hw}), xf({ hw, yBase,  hw}), uvSide, glm::vec3(model * glm::vec4(1, 0, 0, 0)), flameCol);
+            // Left face (-X)
+            addQuad(xf({-hw, yBase,  hw}), xf({-hw, yBase + hTotal,  hw}), xf({-hw, yBase + hTotal, -hw}), xf({-hw, yBase, -hw}), uvSide, glm::vec3(model * glm::vec4(-1, 0, 0, 0)), flameCol);
+        } else if (Cell{drop.type}.isFlatItem()) {
+            // True 3D Voxel Extruded Item Drop
+            uint32_t tileId = TextureAtlas::getTileForBlock(drop.type, 0);
+            bool occupied[16][16];
+            glm::vec4 pixelColor[16][16];
+            for (int py = 0; py < 16; ++py) {
+                for (int px = 0; px < 16; ++px) {
+                    occupied[py][px] = TextureAtlas::getTilePixel(tileId, px, py, pixelColor[py][px]);
+                }
+            }
+
+            float totalSize = 0.32f;
+            float voxelSize = totalSize / 16.0f;
+            float voxelThick = 0.024f;
+            float zMin = -voxelThick * 0.5f;
+            float zMax =  voxelThick * 0.5f;
+
+            int col = tileId % TextureAtlas::TILES_PER_ROW;
+            int row = tileId / TextureAtlas::TILES_PER_ROW;
+
+            auto xf = [&](const glm::vec3& p) { return glm::vec3(model * glm::vec4(p, 1.0f)); };
+
+            for (int py = 0; py < 16; ++py) {
+                for (int px = 0; px < 16; ++px) {
+                    if (!occupied[py][px]) continue;
+
+                    float x0 = (static_cast<float>(px) - 8.0f) * voxelSize;
+                    float x1 = x0 + voxelSize;
+                    float y1 = (8.0f - static_cast<float>(py)) * voxelSize;
+                    float y0 = y1 - voxelSize;
+
+                    int atlasX = col * TextureAtlas::TILE_SIZE + px;
+                    int atlasY = row * TextureAtlas::TILE_SIZE + py;
+                    float u0 = static_cast<float>(atlasX) / static_cast<float>(TextureAtlas::ATLAS_WIDTH);
+                    float v0 = static_cast<float>(atlasY) / static_cast<float>(TextureAtlas::ATLAS_HEIGHT);
+                    float u1 = static_cast<float>(atlasX + 1) / static_cast<float>(TextureAtlas::ATLAS_WIDTH);
+                    float v1 = static_cast<float>(atlasY + 1) / static_cast<float>(TextureAtlas::ATLAS_HEIGHT);
+                    glm::vec4 uv(u0, v0, u1, v1);
+
+                    // Front face (+Z) - CCW: BL -> TL -> TR -> BR
+                    addQuad(xf({x0, y0, zMax}), xf({x0, y1, zMax}), xf({x1, y1, zMax}), xf({x1, y0, zMax}), uv, glm::vec3(model * glm::vec4(0, 0, 1, 0)), itemLitCol);
+
+                    // Back face (-Z) - CCW: BL -> TL -> TR -> BR
+                    addQuad(xf({x1, y0, zMin}), xf({x1, y1, zMin}), xf({x0, y1, zMin}), xf({x0, y0, zMin}), uv, glm::vec3(model * glm::vec4(0, 0, -1, 0)), itemLitCol);
+
+                    // Top edge (+Y)
+                    if (py == 0 || !occupied[py - 1][px]) {
+                        addQuad(xf({x0, y1, zMax}), xf({x0, y1, zMin}), xf({x1, y1, zMin}), xf({x1, y1, zMax}), uv, glm::vec3(model * glm::vec4(0, 1, 0, 0)), itemLitCol);
+                    }
+                    // Bottom edge (-Y)
+                    if (py == 15 || !occupied[py + 1][px]) {
+                        addQuad(xf({x0, y0, zMin}), xf({x0, y0, zMax}), xf({x1, y0, zMax}), xf({x1, y0, zMin}), uv, glm::vec3(model * glm::vec4(0, -1, 0, 0)), itemLitCol);
+                    }
+                    // Left edge (-X)
+                    if (px == 0 || !occupied[py][px - 1]) {
+                        addQuad(xf({x0, y0, zMin}), xf({x0, y1, zMin}), xf({x0, y1, zMax}), xf({x0, y0, zMax}), uv, glm::vec3(model * glm::vec4(-1, 0, 0, 0)), itemLitCol);
+                    }
+                    // Right edge (+X)
+                    if (px == 15 || !occupied[py][px + 1]) {
+                        addQuad(xf({x1, y0, zMax}), xf({x1, y1, zMax}), xf({x1, y1, zMin}), xf({x1, y0, zMin}), uv, glm::vec3(model * glm::vec4(1, 0, 0, 0)), itemLitCol);
+                    }
+                }
+            }
+        } else if (Cell{drop.type}.isFoliage()) {
             float hs = 0.22f;
             glm::vec4 uv = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(drop.type, 0));
             
@@ -167,7 +306,7 @@ void ItemDropManager::render(VkCommandBuffer cmd,
             addQuad(f0, f1, f2, f3, uv, nFront, itemLitCol);
             addQuad(f3, f2, f1, f0, uv, -nFront, itemLitCol);
 
-            // Crossed Quad 2 (rotated 90 degrees for plants/torches)
+            // Crossed Quad 2 (rotated 90 degrees for plants/foliage)
             glm::mat4 m90 = glm::rotate(model, glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             glm::vec3 c0 = glm::vec3(m90 * glm::vec4(-hs, -hs, 0.0f, 1.0f));
             glm::vec3 c1 = glm::vec3(m90 * glm::vec4(-hs,  hs, 0.0f, 1.0f));
@@ -197,40 +336,38 @@ void ItemDropManager::render(VkCommandBuffer cmd,
             glm::vec3 b1 = xf(l1 - glm::vec3(0, H, 0));
             glm::vec3 b2 = xf(l2 - glm::vec3(0, H, 0));
 
-            // Top Face (face 0): CCW winding (t0 -> t2 -> t1) viewed from outside/above
+            // Top Face (face 0): Double-sided for complete robustness against culling and viewport flips
             glm::vec4 uvTop = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(drop.type, 0));
-            float uMidTop = uvTop.x + (uvTop.z - uvTop.x) * 0.5f;
             glm::vec3 nTop = glm::normalize(glm::vec3(model * glm::vec4(0.0f, 1.0f, 0.0f, 0.0f)));
-            addTri(t0, t2, t1,
-                   glm::vec2(uMidTop, uvTop.y),
-                   glm::vec2(uvTop.x, uvTop.w),
-                   glm::vec2(uvTop.z, uvTop.w),
-                   nTop, itemLitCol);
+            glm::vec2 uvTop0((uvTop.x + uvTop.z) * 0.5f, uvTop.y);
+            glm::vec2 uvTop1(uvTop.z, uvTop.w);
+            glm::vec2 uvTop2(uvTop.x, uvTop.w);
+            addTri(t0, t1, t2, uvTop0, uvTop1, uvTop2, nTop, itemLitCol);
+            addTri(t0, t2, t1, uvTop0, uvTop2, uvTop1, nTop, itemLitCol);
 
-            // Bottom Face (face 1): CCW winding (b0 -> b1 -> b2) viewed from outside/below
+            // Bottom Face (face 1): Double-sided for complete robustness against culling and viewport flips
             glm::vec4 uvBot = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(drop.type, 1));
-            float uMidBot = uvBot.x + (uvBot.z - uvBot.x) * 0.5f;
             glm::vec3 nBot = glm::normalize(glm::vec3(model * glm::vec4(0.0f, -1.0f, 0.0f, 0.0f)));
-            addTri(b0, b1, b2,
-                   glm::vec2(uMidBot, uvBot.w),
-                   glm::vec2(uvBot.z, uvBot.y),
-                   glm::vec2(uvBot.x, uvBot.y),
-                   nBot, itemLitCol);
+            glm::vec2 uvBot0((uvBot.x + uvBot.z) * 0.5f, uvBot.y);
+            glm::vec2 uvBot1(uvBot.z, uvBot.w);
+            glm::vec2 uvBot2(uvBot.x, uvBot.w);
+            addTri(b0, b2, b1, uvBot0, uvBot2, uvBot1, nBot, itemLitCol);
+            addTri(b0, b1, b2, uvBot0, uvBot1, uvBot2, nBot, itemLitCol);
 
-            // Side Wall 0 (between l0 and l1)
+            // Side Wall 0 (between l1 and l0): Left is l1, Right is l0. CCW from outside: b1 -> t1 -> t0 -> b0
             glm::vec4 uvSide0 = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(drop.type, 2));
-            glm::vec3 n0 = glm::normalize(glm::cross(t1 - t0, b0 - t0));
-            addQuad(b0, t0, t1, b1, uvSide0, n0, itemLitCol);
+            glm::vec3 n0 = glm::normalize(glm::cross(b0 - b1, t1 - b1));
+            addQuad(b1, t1, t0, b0, uvSide0, n0, itemLitCol);
 
-            // Side Wall 1 (between l1 and l2)
+            // Side Wall 1 (between l2 and l1): Left is l2, Right is l1. CCW from outside: b2 -> t2 -> t1 -> b1
             glm::vec4 uvSide1 = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(drop.type, 3));
-            glm::vec3 n1 = glm::normalize(glm::cross(t2 - t1, b1 - t1));
-            addQuad(b1, t1, t2, b2, uvSide1, n1, itemLitCol);
+            glm::vec3 n1 = glm::normalize(glm::cross(b1 - b2, t2 - b2));
+            addQuad(b2, t2, t1, b1, uvSide1, n1, itemLitCol);
 
-            // Side Wall 2 (between l2 and l0)
+            // Side Wall 2 (between l0 and l2): Left is l0, Right is l2. CCW from outside: b0 -> t0 -> t2 -> b2
             glm::vec4 uvSide2 = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(drop.type, 4));
-            glm::vec3 n2 = glm::normalize(glm::cross(t0 - t2, b2 - t2));
-            addQuad(b2, t2, t0, b0, uvSide2, n2, itemLitCol);
+            glm::vec3 n2 = glm::normalize(glm::cross(b2 - b0, t0 - b0));
+            addQuad(b0, t0, t2, b2, uvSide2, n2, itemLitCol);
         }
     }
 

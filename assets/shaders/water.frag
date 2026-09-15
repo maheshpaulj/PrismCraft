@@ -19,7 +19,7 @@ layout(binding = 4) uniform sampler2D depthSampler;
 layout(push_constant) uniform PushConstants {
     mat4 mvp;
     vec4 sunDir;     // xyz = normalized sun dir, w = sun intensity (positive = vibrant visuals ON, negative = OFF)
-    vec4 skyFog;     // xyz = fog color, w = fog distance (negative if underwater)
+    vec4 skyFog;     // xyz = fog color, w = fog distance (negative if underawater)
     vec4 camPos;     // xyz = camera pos, w = time
     vec4 playerPos;  // xyz = player pos, w = packed
     vec4 pointLight1;

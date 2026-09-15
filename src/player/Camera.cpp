@@ -18,6 +18,17 @@ void Camera::processMouseMovement(float xoffset, float yoffset) {
     updateVectors();
 }
 
+void Camera::setPitch(float pitch) {
+    float maxPitch = 1.55f;
+    m_pitch = std::clamp(pitch, -maxPitch, maxPitch);
+    updateVectors();
+}
+
+void Camera::setYaw(float yaw) {
+    m_yaw = yaw;
+    updateVectors();
+}
+
 void Camera::processKeyboard(int direction, float deltaTime) {
     float velocity = speed * deltaTime;
     glm::vec3 horizForward = glm::normalize(glm::vec3(m_forward.x, 0.0f, m_forward.z));
@@ -79,8 +90,36 @@ glm::mat4 Camera::getViewMatrix() const {
     return glm::lookAt(m_position, m_position + m_forward, glm::vec3(0.0f, 1.0f, 0.0f));
 }
 
+static float haltonRadicalInverse(int index, int base) {
+    float result = 0.0f;
+    float f = 1.0f / static_cast<float>(base);
+    int i = index;
+    while (i > 0) {
+        result += f * static_cast<float>(i % base);
+        i /= base;
+        f /= static_cast<float>(base);
+    }
+    return result;
+}
+
+glm::vec2 Camera::getHaltonJitter(int frameIndex, int sequenceLength) {
+    int idx = (std::abs(frameIndex) % sequenceLength) + 1;
+    float hX = haltonRadicalInverse(idx, 2) - 0.5f;
+    float hY = haltonRadicalInverse(idx, 3) - 0.5f;
+    return glm::vec2(hX, hY);
+}
+
 glm::mat4 Camera::getProjectionMatrix(float aspectRatio) const {
     return glm::perspective(glm::radians(fov), aspectRatio, nearPlane, farPlane);
+}
+
+glm::mat4 Camera::getJitteredProjectionMatrix(float aspectRatio, const glm::vec2& jitterOffset, const glm::vec2& renderResolution) const {
+    glm::mat4 proj = getProjectionMatrix(aspectRatio);
+    if (renderResolution.x > 0.0f && renderResolution.y > 0.0f) {
+        proj[2][0] += (2.0f * jitterOffset.x) / renderResolution.x;
+        proj[2][1] += (2.0f * jitterOffset.y) / renderResolution.y;
+    }
+    return proj;
 }
 
 Frustum Camera::getFrustum(float aspectRatio) const {

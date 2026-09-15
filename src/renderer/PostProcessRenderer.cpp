@@ -184,7 +184,7 @@ void PostProcessRenderer::createResources(uint32_t width, uint32_t height) {
     sceneDepthInfo.format = m_depthFormat;
     sceneDepthInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     sceneDepthInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    sceneDepthInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    sceneDepthInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     sceneDepthInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     sceneDepthInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -204,10 +204,41 @@ void PostProcessRenderer::createResources(uint32_t width, uint32_t height) {
     VK_CHECK(vkCreateImageView(m_context.getDevice(), &sceneDepthViewInfo, nullptr, &m_sceneDepthImageView),
              "Failed to create PostProcess scene depth image view!");
 
+    // Create LDR Tonemapped Target (sized to render resolution, sampled by TSR / FSR upscaler)
+    VkImageCreateInfo ldrInfo{};
+    ldrInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ldrInfo.imageType = VK_IMAGE_TYPE_2D;
+    ldrInfo.extent = { m_width, m_height, 1 };
+    ldrInfo.mipLevels = 1;
+    ldrInfo.arrayLayers = 1;
+    ldrInfo.format = m_swapchainFormat;
+    ldrInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ldrInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    ldrInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    ldrInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    ldrInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VK_CHECK(vmaCreateImage(m_context.getAllocator(), &ldrInfo, &allocInfo, &m_ldrImage, &m_ldrAllocation, nullptr),
+             "Failed to allocate PostProcess LDR image!");
+
+    VkImageViewCreateInfo ldrViewInfo{};
+    ldrViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    ldrViewInfo.image = m_ldrImage;
+    ldrViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    ldrViewInfo.format = m_swapchainFormat;
+    ldrViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    ldrViewInfo.subresourceRange.baseMipLevel = 0;
+    ldrViewInfo.subresourceRange.levelCount = 1;
+    ldrViewInfo.subresourceRange.baseArrayLayer = 0;
+    ldrViewInfo.subresourceRange.layerCount = 1;
+    VK_CHECK(vkCreateImageView(m_context.getDevice(), &ldrViewInfo, nullptr, &m_ldrImageView),
+             "Failed to create PostProcess LDR image view!");
+
     m_currentHDRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     m_currentDepthLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     m_currentSSRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     m_currentSSRDepthLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    m_currentLDRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     // Update Descriptor Set with new HDR Image View
     createDescriptorSet();
@@ -240,6 +271,15 @@ void PostProcessRenderer::cleanupResources() {
         vmaDestroyImage(m_context.getAllocator(), m_ssrImage, m_ssrAllocation);
         m_ssrImage = VK_NULL_HANDLE;
         m_ssrAllocation = VK_NULL_HANDLE;
+    }
+    if (m_ldrImageView != VK_NULL_HANDLE) {
+        vkDestroyImageView(m_context.getDevice(), m_ldrImageView, nullptr);
+        m_ldrImageView = VK_NULL_HANDLE;
+    }
+    if (m_ldrImage != VK_NULL_HANDLE) {
+        vmaDestroyImage(m_context.getAllocator(), m_ldrImage, m_ldrAllocation);
+        m_ldrImage = VK_NULL_HANDLE;
+        m_ldrAllocation = VK_NULL_HANDLE;
     }
     if (m_hdrImageView != VK_NULL_HANDLE) {
         vkDestroyImageView(m_context.getDevice(), m_hdrImageView, nullptr);
@@ -350,9 +390,9 @@ void PostProcessRenderer::transitionDepthForRendering(VkCommandBuffer cmd) {
     VkImageMemoryBarrier2 barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
     barrier.srcStageMask = (m_currentDepthLayout == VK_IMAGE_LAYOUT_UNDEFINED) ?
-        VK_PIPELINE_STAGE_2_NONE : (VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT);
+        VK_PIPELINE_STAGE_2_NONE : (VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT);
     barrier.srcAccessMask = (m_currentDepthLayout == VK_IMAGE_LAYOUT_UNDEFINED) ?
-        0 : (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
+        0 : (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT);
     barrier.dstStageMask = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
     barrier.dstAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
     barrier.oldLayout = m_currentDepthLayout;
@@ -371,6 +411,126 @@ void PostProcessRenderer::transitionDepthForRendering(VkCommandBuffer cmd) {
     vkCmdPipelineBarrier2(cmd, &depInfo);
 
     m_currentDepthLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+}
+
+void PostProcessRenderer::transitionDepthForSampling(VkCommandBuffer cmd) {
+    if (m_currentDepthLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) return;
+
+    VkImageMemoryBarrier2 barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    barrier.srcStageMask = (m_currentDepthLayout == VK_IMAGE_LAYOUT_UNDEFINED) ?
+        VK_PIPELINE_STAGE_2_NONE : (VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT);
+    barrier.srcAccessMask = (m_currentDepthLayout == VK_IMAGE_LAYOUT_UNDEFINED) ?
+        0 : (VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+    barrier.oldLayout = m_currentDepthLayout;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.image = m_sceneDepthImage;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkDependencyInfo depInfo{};
+    depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depInfo.imageMemoryBarrierCount = 1;
+    depInfo.pImageMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(cmd, &depInfo);
+
+    m_currentDepthLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+}
+
+void PostProcessRenderer::transitionLDRForRendering(VkCommandBuffer cmd) {
+    if (m_currentLDRLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL) return;
+
+    VkImageMemoryBarrier2 barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    barrier.srcStageMask = (m_currentLDRLayout == VK_IMAGE_LAYOUT_UNDEFINED) ?
+        VK_PIPELINE_STAGE_2_NONE : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    barrier.srcAccessMask = (m_currentLDRLayout == VK_IMAGE_LAYOUT_UNDEFINED) ?
+        0 : VK_ACCESS_2_SHADER_READ_BIT;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    barrier.oldLayout = m_currentLDRLayout;
+    barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    barrier.image = m_ldrImage;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkDependencyInfo depInfo{};
+    depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depInfo.imageMemoryBarrierCount = 1;
+    depInfo.pImageMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(cmd, &depInfo);
+
+    m_currentLDRLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+}
+
+void PostProcessRenderer::transitionLDRForSampling(VkCommandBuffer cmd) {
+    if (m_currentLDRLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) return;
+
+    VkImageMemoryBarrier2 barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+    barrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+    barrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+    barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+    barrier.oldLayout = m_currentLDRLayout;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.image = m_ldrImage;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkDependencyInfo depInfo{};
+    depInfo.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO;
+    depInfo.imageMemoryBarrierCount = 1;
+    depInfo.pImageMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(cmd, &depInfo);
+
+    m_currentLDRLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+}
+
+void PostProcessRenderer::renderToLDR(VkCommandBuffer cmd,
+                                      float exposure, float vibrance, float bloomStrength, float time,
+                                      bool vibrantVisuals, float sharpening, float isUnderwater,
+                                      float sunScreenU, float sunScreenV,
+                                      float sunIntensity, float sunHeight) {
+    transitionHDRForSampling(cmd);
+    transitionLDRForRendering(cmd);
+
+    VkRenderingAttachmentInfo colorAttachment{};
+    colorAttachment.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    colorAttachment.imageView = m_ldrImageView;
+    colorAttachment.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+    VkRenderingInfo renderInfo{};
+    renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    renderInfo.renderArea = { { 0, 0 }, { m_width, m_height } };
+    renderInfo.layerCount = 1;
+    renderInfo.colorAttachmentCount = 1;
+    renderInfo.pColorAttachments = &colorAttachment;
+    renderInfo.pDepthAttachment = nullptr;
+
+    vkCmdBeginRendering(cmd, &renderInfo);
+
+    renderQuad(cmd, { m_width, m_height }, exposure, vibrance, bloomStrength, time,
+               vibrantVisuals, sharpening, isUnderwater, sunScreenU, sunScreenV,
+               sunIntensity, sunHeight);
+
+    vkCmdEndRendering(cmd);
+
+    transitionLDRForSampling(cmd);
+    transitionDepthForSampling(cmd);
 }
 
 void PostProcessRenderer::copyHDRToSSR(VkCommandBuffer cmd, VkImage sceneDepthImage) {

@@ -163,4 +163,35 @@ inline glm::vec3 cellToWorldCenter(int x, int y, int z, int s) {
     return {cx, cy, cz};
 }
 
+// Get the 4 cells that constitute a full 2-column bed (Foot s=0, Foot s=1, Head s=0, Head s=1)
+inline void getBedAllCells(int x, int y, int z, int s, uint8_t level, CellCoord outCells[4]) {
+    (void)s;
+    bool isHead = (level & 1) != 0;
+    uint8_t facing = (level >> 2) & 3;
+    int rowParity = floorMod(z, 2);
+
+    int xF = x, zF = z;
+    int xH = x, zH = z;
+
+    if (!isHead) {
+        xF = x; zF = z;
+        if (facing == 0)      { xH = x + 1; zH = z; }
+        else if (facing == 1) { xH = x - 1; zH = z; }
+        else if (facing == 2) { xH = (rowParity == 0 ? x : x + 1); zH = z + 1; }
+        else                  { xH = (rowParity == 0 ? x - 1 : x); zH = z - 1; }
+    } else {
+        xH = x; zH = z;
+        if (facing == 0)      { xF = x - 1; zF = z; }
+        else if (facing == 1) { xF = x + 1; zF = z; }
+        else if (facing == 2) { xF = (rowParity == 0 ? x - 1 : x); zF = z - 1; }
+        else                  { xF = (rowParity == 0 ? x : x + 1); zF = z + 1; }
+    }
+
+    outCells[0] = {xF, y, zF, 0};
+    outCells[1] = {xF, y, zF, 1};
+    outCells[2] = {xH, y, zH, 0};
+    outCells[3] = {xH, y, zH, 1};
+}
+
 } // namespace prismcraft
+

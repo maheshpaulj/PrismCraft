@@ -49,7 +49,7 @@ void WaterSimulator::scheduleUpdate(int worldX, int y, int worldZ, int s) {
     }
 }
 
-void WaterSimulator::onBlockChanged(World& world, int worldX, int y, int worldZ, int s) {
+void WaterSimulator::onBlockChanged(World& /*world*/, int worldX, int y, int worldZ, int s) {
     scheduleUpdate(worldX, y, worldZ, s);
     CellCoord neighbors[5];
     getNeighbors(worldX, y, worldZ, s, neighbors);

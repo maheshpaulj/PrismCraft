@@ -155,6 +155,14 @@ Pipeline::Pipeline(VulkanContext& context,
             colorBlendAttachments[i].srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
             colorBlendAttachments[i].dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
             colorBlendAttachments[i].alphaBlendOp = VK_BLEND_OP_ADD;
+        } else if (blendMode == BlendMode::Multiply) {
+            colorBlendAttachments[i].blendEnable = VK_TRUE;
+            colorBlendAttachments[i].srcColorBlendFactor = VK_BLEND_FACTOR_DST_COLOR;
+            colorBlendAttachments[i].dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+            colorBlendAttachments[i].colorBlendOp = VK_BLEND_OP_ADD;
+            colorBlendAttachments[i].srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+            colorBlendAttachments[i].dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            colorBlendAttachments[i].alphaBlendOp = VK_BLEND_OP_ADD;
         } else {
             colorBlendAttachments[i].blendEnable = VK_FALSE;
         }

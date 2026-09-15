@@ -28,7 +28,11 @@
 #include "ui/MenuRenderer.hpp"
 #include "renderer/PlayerModelRenderer.hpp"
 #include "renderer/PostProcessRenderer.hpp"
+#include "renderer/TSRRenderer.hpp"
 #include "game/ArrowManager.hpp"
+#include "data/BlockRegistry.hpp"
+#include "world/SaveManager.hpp"
+#include "world/Biome.hpp"
 
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
@@ -143,27 +147,42 @@ static void checkAndAutoRecompileShaders(const std::string& exeDir) {
 namespace prismcraft {
 
 static float calculateBreakDuration(BlockType block, BlockType tool) {
-    if (Cell{block}.isFoliage() || Cell{block}.isTorch()) {
-        return 0.05f; // Instant break for plants, flowers, tall grass, torches
+    if (Cell{block}.isFoliage() || Cell{block}.isTorch() || Cell{block}.isLantern()) {
+        return 0.05f; // Instant break for plants, flowers, tall grass, torches, lanterns
     }
 
     float baseTime = 1.0f;
     bool requiresPickaxe = false;
-    bool isWoodBlock = (block == BlockType::Wood || block == BlockType::Planks || block == BlockType::CraftingTable);
-    bool isStoneBlock = (block == BlockType::Stone || block == BlockType::CobbleStone || block == BlockType::Furnace);
-    bool isOreBlock = (block == BlockType::OreCoal || block == BlockType::OreIron || block == BlockType::OreGold || block == BlockType::OreDiamond);
-    bool isDirtBlock = (block == BlockType::Grass || block == BlockType::Dirt || block == BlockType::Sand || block == BlockType::Gravel || block == BlockType::Snow);
+    bool isWoodBlock = (block == BlockType::Wood || block == BlockType::Planks || block == BlockType::CraftingTable ||
+                        block == BlockType::DoorWood || block == BlockType::Bed ||
+                        (block >= BlockType::PlanksPine && block <= BlockType::PlanksJungle) ||
+                        (block >= BlockType::LogSpruce && block <= BlockType::LogAcacia) ||
+                        block == BlockType::PlanksDarkOak || block == BlockType::PlanksAcacia ||
+                        Cell{block}.isTrapdoor() || (block >= BlockType::DoorSpruce && block <= BlockType::DoorAcacia) ||
+                        block == BlockType::Barrel);
+    bool isStoneBlock = (block == BlockType::Stone || block == BlockType::CobbleStone || block == BlockType::Furnace ||
+                         block == BlockType::SmoothStone || block == BlockType::DoorIron ||
+                         (block >= BlockType::Andesite && block <= BlockType::MudBricks) ||
+                         block == BlockType::TrapdoorIron || block == BlockType::Smoker || block == BlockType::BlastFurnace);
+    bool isOreBlock = (block == BlockType::OreCoal || block == BlockType::OreIron || block == BlockType::OreGold ||
+                       block == BlockType::OreDiamond || block == BlockType::OreRedstone || block == BlockType::OreEmerald ||
+                       block == BlockType::OreNetherQuartz || block == BlockType::OreCopper || block == BlockType::OreLapis ||
+                       (block >= BlockType::DeepslateCoal && block <= BlockType::DeepslateCopper));
+    bool isDirtBlock = (block == BlockType::Grass || block == BlockType::Dirt || block == BlockType::Sand ||
+                        block == BlockType::Gravel || block == BlockType::Snow || block == BlockType::CoarseDirt);
 
     if (isWoodBlock) {
-        baseTime = 1.8f;
+        baseTime = (block == BlockType::DoorWood || block == BlockType::Bed) ? 0.75f : 1.8f;
     } else if (isStoneBlock) {
-        baseTime = 3.2f;
+        baseTime = (block == BlockType::DoorIron) ? 3.0f : 3.2f;
         requiresPickaxe = true;
     } else if (isOreBlock) {
         baseTime = 4.8f;
         requiresPickaxe = true;
     } else if (isDirtBlock) {
         baseTime = 0.65f;
+    } else if (block == BlockType::Torch || block == BlockType::Lantern || Cell{block}.isFoliage()) {
+        baseTime = 0.12f;
     } else if (block == BlockType::Bedrock) {
         return 999999.0f;
     }
@@ -175,7 +194,8 @@ static float calculateBreakDuration(BlockType block, BlockType tool) {
         case 1: tierMultiplier = 2.0f; break;  // Wood
         case 2: tierMultiplier = 4.0f; break;  // Stone
         case 3: tierMultiplier = 6.0f; break;  // Iron
-        case 4: tierMultiplier = 8.5f; break;  // Diamond
+        case 4: tierMultiplier = 12.0f; break; // Gold (ultra fast)
+        case 5: tierMultiplier = 8.5f; break;  // Diamond
         default: tierMultiplier = 1.0f; break;
     }
 
@@ -205,20 +225,46 @@ void run() {
     GameOptions options;
     ConfigManager::load(options, exeDir + "options.txt");
 
-    // Clamp terrain chunk streaming distance to realistic bounds [4, 24] so CPU is never flooded
-    options.renderDistance = std::clamp(options.renderDistance, 4, 24);
+    // Clamp terrain chunk streaming distance to realistic bounds [4, 48]
+    options.renderDistance = std::clamp(options.renderDistance, 4, 48);
 
     static const int resList[4][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
     int initialW = (options.resIndex < 4) ? resList[options.resIndex][0] : 1920;
     int initialH = (options.resIndex < 4) ? resList[options.resIndex][1] : 1080;
 
-    auto computeRenderResolution = [](int resIdx, int winW, int winH) -> std::pair<uint32_t, uint32_t> {
-        static const int resTable[4][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
-        if (resIdx >= 0 && resIdx < 4) {
-            return { static_cast<uint32_t>(resTable[resIdx][0]), static_cast<uint32_t>(resTable[resIdx][1]) };
+    auto computeInternalResolution = [](const GameOptions& opt, int winW, int winH) -> std::pair<uint32_t, uint32_t> {
+        uint32_t baseW = static_cast<uint32_t>(std::max(winW, 1));
+        uint32_t baseH = static_cast<uint32_t>(std::max(winH, 1));
+
+        if (opt.upscalerMode == 0) { // Off / Native
+            static const int resTable[4][2] = {{1280, 720}, {1600, 900}, {1920, 1080}, {2560, 1440}};
+            if (opt.resIndex >= 0 && opt.resIndex < 4) {
+                return { static_cast<uint32_t>(resTable[opt.resIndex][0]), static_cast<uint32_t>(resTable[opt.resIndex][1]) };
+            }
+            return { baseW, baseH };
         }
-        // Index 4 (Native): render at 100% of physical display / window resolution
-        return { static_cast<uint32_t>(std::max(winW, 1)), static_cast<uint32_t>(std::max(winH, 1)) };
+
+        // Upscaler Quality Presets (FSR 1.0 Spatial & TSR Temporal):
+        // 0: Ultra Quality (1.3x scale -> ~77% render scale)
+        // 1: Quality (1.5x scale -> ~67% render scale)
+        // 2: Balanced (1.7x scale -> ~59% render scale)
+        // 3: Performance (2.0x scale -> ~50% render scale)
+        float scale = 0.67f;
+        switch (opt.upscalerQuality) {
+            case 0: scale = 0.77f; break;
+            case 1: scale = 0.67f; break;
+            case 2: scale = 0.59f; break;
+            case 3: scale = 0.50f; break;
+            default: scale = 0.67f; break;
+        }
+
+        uint32_t rw = static_cast<uint32_t>(std::round(baseW * scale));
+        uint32_t rh = static_cast<uint32_t>(std::round(baseH * scale));
+        if (rw % 2 != 0) rw++;
+        if (rh % 2 != 0) rh++;
+        rw = std::max(rw, 320u);
+        rh = std::max(rh, 240u);
+        return { rw, rh };
     };
 
     Window window("PrismCraft", initialW, initialH);
@@ -234,11 +280,13 @@ void run() {
     Swapchain swapchain(context, window.getWidth(), window.getHeight(), options.vsync);
     CommandQueue commandQueue(context);
 
-    auto [initialRenderW, initialRenderH] = computeRenderResolution(options.resIndex, window.getWidth(), window.getHeight());
+    auto [initialRenderW, initialRenderH] = computeInternalResolution(options, window.getWidth(), window.getHeight());
     PostProcessRenderer postProcessRenderer(context, initialRenderW, initialRenderH, swapchain.getImageFormat(), exeDir);
+    TSRRenderer tsrRenderer(context, window.getWidth(), window.getHeight(), swapchain.getImageFormat(), exeDir);
     
-    // Generate & Upload 256x512 Pixel-Art Texture Atlas with Crisp Nearest Filtering (zero blur, zero atlas bleed)
-    std::vector<uint8_t> atlasPixels = TextureAtlas::generateAtlasPixels();
+    // Initialize BlockRegistry and generate unified 1024x1024 Pixel-Art Texture Atlas
+    BlockRegistry::init(exeDir + "assets/blocks.json");
+    std::vector<uint8_t> atlasPixels = TextureAtlas::generateAtlasPixels(exeDir + "assets/");
     Texture textureAtlas(context, commandQueue, TextureAtlas::ATLAS_WIDTH, TextureAtlas::ATLAS_HEIGHT, atlasPixels.data(), false, false, 0);
     VkDescriptorSetLayout descLayout = textureAtlas.getDescriptorSetLayout();
     VkDescriptorSet descSet = textureAtlas.getDescriptorSet();
@@ -517,6 +565,16 @@ void run() {
                                    exeDir + "assets/shaders/cell.vert.spv", exeDir + "assets/shaders/cell.frag.spv",
                                    sceneDescLayout, true, false, BlendMode::Invert, VK_CULL_MODE_NONE);
 
+    // 3D Block Crack Mining Overlay Pipeline (Depth test ON, Depth write OFF, Multiplicative Blending ON, Depth Bias enabled)
+    Pipeline crackPipeline(context,
+                           std::vector<VkFormat>{ postProcessRenderer.getHDRFormat() },
+                           swapchain.getDepthFormat(),
+                           exeDir + "assets/shaders/cell.vert.spv",
+                           exeDir + "assets/shaders/cell.frag.spv",
+                           sceneDescLayout,
+                           true, false, BlendMode::Multiply, VK_CULL_MODE_NONE,
+                           true, -2.0f, -2.0f, true);
+
     // 2D UI Pipeline (Targeting Swapchain sRGB image directly, Depth test/write OFF)
     Pipeline uiPipeline(context, swapchain.getImageFormat(), swapchain.getDepthFormat(),
                         exeDir + "assets/shaders/ui.vert.spv", exeDir + "assets/shaders/ui.frag.spv",
@@ -529,14 +587,24 @@ void run() {
     
     std::cout << "[Main] Pipelines created, creating World..." << std::endl;
     uint32_t currentSeed = 42;
-    std::unique_ptr<World> world = std::make_unique<World>(context, commandQueue, currentSeed);
+    std::string currentWorldFolder = "";
+    std::unique_ptr<World> world = std::make_unique<World>(context, commandQueue, currentSeed, currentWorldFolder);
     world->renderDistance = options.renderDistance;
+    world->lodDistance = options.lodDistance;
     world->lodPreset = options.lodPreset;
+    world->setRamCacheSize(options.ramCacheSize);
     
     std::cout << "[Main] World created, placing player..." << std::endl;
     float spawnY = world->getHighestSolidY(0.0f, 0.0f);
     Player player(glm::vec3(0.5f, spawnY + 2.5f, 0.5f));
+    if (player.getHotbar()[3] == BlockType::Air) {
+        player.setHotbarBlock(3, BlockType::DoorWood, 4);
+    }
+    if (player.getHotbar()[4] == BlockType::Air) {
+        player.setHotbarBlock(4, BlockType::Bed, 2);
+    }
     player.getCamera().fov = static_cast<float>(options.fov);
+    player.getCamera().farPlane = std::max(500.0f, static_cast<float>(options.lodDistance) * 16.0f * 1.42f);
     player.mouseSensitivity = options.mouseSens;
     AudioEngine::get().setMasterVolume(options.audioVolume);
     AudioEngine::get().setMusicVolume(options.musicVolume);
@@ -568,7 +636,16 @@ void run() {
     int fpsFrameCount = 0;
     float displayedFPS = 60.0f;
     float menuCamAngle = 0.0f;
-    float timeOfDay = 0.19f; // Start at golden hour / late afternoon (matches visual reference)
+    float timeOfDay = 0.0416667f; // Start at morning (1000 ticks)
+    bool isTimePaused = false;
+    uint32_t gameDay = 0;
+    bool isSleeping = false;
+    float sleepTimer = 0.0f;
+    float sleepFadeAlpha = 0.0f;
+    glm::vec3 sleepingBedPos{0.0f};
+    glm::vec3 preSleepPlayerPos{0.0f};
+    float preSleepPitch = 0.0f;
+    float preSleepYaw = 0.0f;
     
     bool isChatOpen = false;
     std::string chatInput = "";
@@ -621,7 +698,8 @@ void run() {
         if (window.wasResized() || screenW != swapchain.getExtent().width || screenH != swapchain.getExtent().height) {
             window.resetResizedFlag();
             swapchain.recreate(screenW, screenH);
-            auto [targetRenderW, targetRenderH] = computeRenderResolution(options.resIndex, screenW, screenH);
+            tsrRenderer.recreate(screenW, screenH);
+            auto [targetRenderW, targetRenderH] = computeInternalResolution(options, screenW, screenH);
             if (targetRenderW != postProcessRenderer.getWidth() || targetRenderH != postProcessRenderer.getHeight()) {
                 postProcessRenderer.recreate(targetRenderW, targetRenderH);
                 updateWaterDescriptorSets();
@@ -634,10 +712,20 @@ void run() {
         glm::vec2 uiMousePos = mousePos / options.uiScale;
 
         // Advance Day / Night Cycle (1200s / 20 min full cycle, exact Minecraft parity)
-        timeOfDay += dt / 1200.0f;
-        if (timeOfDay > 1.0f) timeOfDay -= 1.0f;
+        if (state == GameState::Playing && !isTimePaused) {
+            timeOfDay += dt / 1200.0f;
+            while (timeOfDay >= 1.0f) {
+                timeOfDay -= 1.0f;
+                gameDay++;
+            }
+            while (timeOfDay < 0.0f) {
+                timeOfDay += 1.0f;
+                if (gameDay > 0) gameDay--;
+            }
+        }
 
-        float celestialAngle = timeOfDay * glm::two_pi<float>();
+        // Calibrated celestial angle: 0.0=Sunrise (east), 0.25=Noon (zenith), 0.50=Sunset (west), 0.75=Midnight (nadir)
+        float celestialAngle = (timeOfDay - 0.25f) * glm::two_pi<float>();
         glm::vec3 sunDir(std::sin(celestialAngle), std::cos(celestialAngle), 0.35f);
         sunDir = glm::normalize(sunDir);
 
@@ -665,7 +753,7 @@ void run() {
         if (isUnderwater) {
             skyColor = glm::vec3(0.012f, 0.065f, 0.110f); // Deep oceanic slate-blue underwater fog
         }
-        float maxVisibleDist = static_cast<float>(world->renderDistance * 16);
+        float maxVisibleDist = static_cast<float>(std::max(world->renderDistance, world->lodDistance) * 16);
         float fogDistance = isUnderwater ? 16.0f : (maxVisibleDist * 0.92f);
 
         // -------------------------------------------------------------
@@ -689,39 +777,162 @@ void run() {
                     std::string cmd = chatInput;
                     while (!cmd.empty() && cmd.front() == ' ') cmd.erase(cmd.begin());
                     if (!cmd.empty()) {
-                        if (cmd == "/time set day" || cmd == "/time set 1000") {
-                            timeOfDay = 0.05f;
-                            chatFeedback = "Set the time to 1000 (Day)";
-                        } else if (cmd == "/time set noon" || cmd == "/time set 6000") {
-                            timeOfDay = 0.0f;
-                            chatFeedback = "Set the time to 6000 (Noon)";
-                        } else if (cmd == "/time set sunset" || cmd == "/time set dusk" || cmd == "/time set 12000") {
-                            timeOfDay = 0.23f;
-                            chatFeedback = "Set the time to 12000 (Sunset)";
-                        } else if (cmd == "/time set night" || cmd == "/time set 13000") {
-                            timeOfDay = 0.35f;
-                            chatFeedback = "Set the time to 13000 (Night)";
-                        } else if (cmd == "/time set midnight" || cmd == "/time set 18000") {
-                            timeOfDay = 0.50f;
-                            chatFeedback = "Set the time to 18000 (Midnight)";
-                        } else if (cmd == "/time set sunrise" || cmd == "/time set dawn" || cmd == "/time set 0") {
-                            timeOfDay = 0.78f;
-                            chatFeedback = "Set the time to 0 (Sunrise)";
+                        if (cmd.rfind("/time", 0) == 0) {
+                            std::string args = (cmd.size() > 5) ? cmd.substr(5) : "";
+                            while (!args.empty() && args.front() == ' ') args.erase(0, 1);
+
+                            if (args.rfind("set ", 0) == 0) {
+                                std::string param = args.substr(4);
+                                while (!param.empty() && param.front() == ' ') param.erase(0, 1);
+
+                                if (param == "day") {
+                                    timeOfDay = 1000.0f / 24000.0f;
+                                    chatFeedback = "Set the time to 1000 (Day)";
+                                } else if (param == "noon") {
+                                    timeOfDay = 6000.0f / 24000.0f;
+                                    chatFeedback = "Set the time to 6000 (Noon)";
+                                } else if (param == "sunset" || param == "dusk") {
+                                    timeOfDay = 12000.0f / 24000.0f;
+                                    chatFeedback = "Set the time to 12000 (Sunset)";
+                                } else if (param == "night") {
+                                    timeOfDay = 13000.0f / 24000.0f;
+                                    chatFeedback = "Set the time to 13000 (Night)";
+                                } else if (param == "midnight") {
+                                    timeOfDay = 18000.0f / 24000.0f;
+                                    chatFeedback = "Set the time to 18000 (Midnight)";
+                                } else if (param == "sunrise" || param == "dawn") {
+                                    timeOfDay = 0.0f;
+                                    chatFeedback = "Set the time to 0 (Sunrise)";
+                                } else {
+                                    try {
+                                        int ticks = std::stoi(param);
+                                        if (ticks < 0) ticks = 0;
+                                        timeOfDay = static_cast<float>(ticks % 24000) / 24000.0f;
+                                        chatFeedback = "Set the time to " + std::to_string(ticks % 24000);
+                                    } catch (...) {
+                                        chatFeedback = "Unknown time value: " + param;
+                                    }
+                                }
+                                chatFeedbackTimer = 3.0f;
+                            } else if (args.rfind("add ", 0) == 0) {
+                                std::string param = args.substr(4);
+                                while (!param.empty() && param.front() == ' ') param.erase(0, 1);
+                                try {
+                                    int ticksToAdd = std::stoi(param);
+                                    timeOfDay += static_cast<float>(ticksToAdd) / 24000.0f;
+                                    while (timeOfDay >= 1.0f) { timeOfDay -= 1.0f; gameDay++; }
+                                    while (timeOfDay < 0.0f) { timeOfDay += 1.0f; if (gameDay > 0) gameDay--; }
+                                    int currentTicks = static_cast<int>(timeOfDay * 24000.0f) % 24000;
+                                    chatFeedback = "Added " + std::to_string(ticksToAdd) + " to the time (Current: " + std::to_string(currentTicks) + ")";
+                                } catch (...) {
+                                    chatFeedback = "Invalid tick amount: " + param;
+                                }
+                                chatFeedbackTimer = 3.0f;
+                            } else if (args.rfind("query ", 0) == 0) {
+                                std::string param = args.substr(6);
+                                while (!param.empty() && param.front() == ' ') param.erase(0, 1);
+                                if (param == "daytime") {
+                                    int currentTicks = static_cast<int>(timeOfDay * 24000.0f) % 24000;
+                                    chatFeedback = "The time is " + std::to_string(currentTicks);
+                                } else if (param == "day") {
+                                    chatFeedback = "The time is " + std::to_string(gameDay) + " days";
+                                } else if (param == "gametime" || param == "time") {
+                                    uint64_t totalTicks = static_cast<uint64_t>(gameDay) * 24000ULL + static_cast<uint64_t>(timeOfDay * 24000.0f);
+                                    chatFeedback = "The time is " + std::to_string(totalTicks);
+                                } else {
+                                    chatFeedback = "Usage: /time query <daytime|gametime|day>";
+                                }
+                                chatFeedbackTimer = 3.0f;
+                            } else if (args == "pause" || args == "stop") {
+                                isTimePaused = true;
+                                chatFeedback = "Day-night cycle paused";
+                                chatFeedbackTimer = 3.0f;
+                            } else if (args == "resume" || args == "start" || args == "unpause") {
+                                isTimePaused = false;
+                                chatFeedback = "Day-night cycle resumed";
+                                chatFeedbackTimer = 3.0f;
+                            } else {
+                                chatFeedback = "Usage: /time <set|add|query|pause|resume>";
+                                chatFeedbackTimer = 3.0f;
+                            }
                         } else if (cmd == "/gamemode creative" || cmd == "/gamemode c" || cmd == "/gamemode 1") {
+                            player.setCreative(true);
                             player.setFlying(true);
                             chatFeedback = "Set game mode to Creative Mode";
                         } else if (cmd == "/gamemode survival" || cmd == "/gamemode s" || cmd == "/gamemode 0") {
+                            player.setCreative(false);
                             player.setFlying(false);
                             if (player.getCamera().getMode() == CameraMode::FreeCam) player.getCamera().toggleFreeCam();
                             chatFeedback = "Set game mode to Survival Mode";
                         } else if (cmd == "/gamemode spectator" || cmd == "/gamemode sp" || cmd == "/gamemode 3") {
                             if (player.getCamera().getMode() != CameraMode::FreeCam) player.getCamera().toggleFreeCam();
                             chatFeedback = "Set game mode to Spectator Mode";
+                        } else if (cmd.rfind("/locate", 0) == 0) {
+                            std::string target = (cmd.size() > 7) ? cmd.substr(7) : "";
+                            while (!target.empty() && target.front() == ' ') target.erase(0, 1);
+
+                            if (target.rfind("structure ", 0) == 0) {
+                                target = target.substr(10);
+                            }
+                            while (!target.empty() && target.front() == ' ') target.erase(0, 1);
+
+                            if (target.rfind("biome ", 0) == 0) {
+                                std::string bName = target.substr(6);
+                                while (!bName.empty() && bName.front() == ' ') bName.erase(0, 1);
+                                BiomeType targetBiome = BiomeType::Plains;
+                                bool validBiome = true;
+                                if (bName == "mountains" || bName == "mountain" || bName == "peaks") targetBiome = BiomeType::Mountains;
+                                else if (bName == "desert") targetBiome = BiomeType::Desert;
+                                else if (bName == "savanna") targetBiome = BiomeType::Savanna;
+                                else if (bName == "taiga") targetBiome = BiomeType::Taiga;
+                                else if (bName == "forest") targetBiome = BiomeType::Forest;
+                                else if (bName == "birch_forest" || bName == "birch") targetBiome = BiomeType::BirchForest;
+                                else if (bName == "swamp") targetBiome = BiomeType::Swamp;
+                                else if (bName == "ocean") targetBiome = BiomeType::Ocean;
+                                else if (bName == "plains") targetBiome = BiomeType::Plains;
+                                else validBiome = false;
+
+                                if (validBiome && world) {
+                                    int bx = 0, bz = 0;
+                                    int px = static_cast<int>(std::floor(player.getPosition().x));
+                                    int pz = static_cast<int>(std::floor(player.getPosition().z));
+                                    if (world->getTerrainGen().locateBiome(targetBiome, px, pz, bx, bz)) {
+                                        int dist = static_cast<int>(std::round(std::sqrt((bx - px) * (bx - px) + (bz - pz) * (bz - pz))));
+                                        int by = world->getTerrainGen().getHeight(bx, bz);
+                                        chatFeedback = "Nearest " + std::string(getBiomeName(targetBiome)) + " is at [" +
+                                                       std::to_string(bx) + ", " + std::to_string(by) + ", " + std::to_string(bz) +
+                                                       "] (" + std::to_string(dist) + " blocks away)";
+                                    } else {
+                                        chatFeedback = "Could not find biome '" + bName + "' within search distance";
+                                    }
+                                } else {
+                                    chatFeedback = "Unknown biome: " + bName + " (Options: plains, desert, mountains, taiga, forest, birch, savanna, swamp, ocean)";
+                                }
+                            } else if (!target.empty() && world) {
+                                int sx = 0, sy = 0, sz = 0;
+                                int px = static_cast<int>(std::floor(player.getPosition().x));
+                                int pz = static_cast<int>(std::floor(player.getPosition().z));
+                                if (world->getTerrainGen().locateStructure(target, px, pz, sx, sy, sz)) {
+                                    int dist = static_cast<int>(std::round(std::sqrt((sx - px) * (sx - px) + (sz - pz) * (sz - pz))));
+                                    chatFeedback = "Nearest " + target + " is at [" +
+                                                   std::to_string(sx) + ", " + std::to_string(sy) + ", " + std::to_string(sz) +
+                                                   "] (" + std::to_string(dist) + " blocks away)";
+                                } else {
+                                    chatFeedback = "Could not find structure '" + target + "' within 1280 blocks";
+                                }
+                            } else {
+                                chatFeedback = "Usage: /locate <village|temple|outpost|dungeon|biome <name>>";
+                            }
+                        } else if (cmd == "/save") {
+                            if (world) {
+                                world->saveAll(player, timeOfDay);
+                                chatFeedback = "Saved the game";
+                            }
                         } else if (cmd == "/clear") {
                             player.clearInventory();
                             chatFeedback = "Cleared the inventory";
                         } else if (cmd == "/help") {
-                            chatFeedback = "Commands: /time set <day|night|noon>, /gamemode <c|s|sp>, /clear";
+                            chatFeedback = "Commands: /locate <village|temple|outpost|biome>, /time set <day|night>, /gamemode <c|s>, /save, /clear";
                         } else {
                             chatFeedback = "Unknown command: " + cmd;
                         }
@@ -732,6 +943,13 @@ void run() {
                     chatInput.clear();
                 }
             } else if (Input::isKeyPressed(GLFW_KEY_ESCAPE)) {
+                if (isSleeping) {
+                    isSleeping = false;
+                    sleepTimer = 0.0f;
+                    sleepFadeAlpha = 0.0f;
+                    player.setPosition(preSleepPlayerPos);
+                    player.getCamera().setPitch(0.0f);
+                }
                 state = GameState::Paused;
                 window.setCursorMode(false);
                 AudioEngine::get().playSound(SoundEffect::Click);
@@ -746,7 +964,80 @@ void run() {
                 isChatOpen = true;
                 chatInput = "";
             } else {
-                // F6 to toggle Spectator Free Cam
+                if (isSleeping) {
+                    // Shift, Space, or Escape cancels / leaves bed early
+                    if (Input::isKeyPressed(GLFW_KEY_LEFT_SHIFT) || Input::isKeyPressed(GLFW_KEY_RIGHT_SHIFT) ||
+                        Input::isKeyPressed(GLFW_KEY_SPACE) || Input::isKeyPressed(GLFW_KEY_ESCAPE)) {
+                        isSleeping = false;
+                        sleepTimer = 0.0f;
+                        sleepFadeAlpha = 0.0f;
+                        player.setPosition(preSleepPlayerPos);
+                        player.getCamera().setPitch(preSleepPitch);
+                        player.getCamera().setYaw(preSleepYaw);
+                        chatFeedback = "Left the bed";
+                        chatFeedbackTimer = 2.0f;
+                        AudioEngine::get().playSound(SoundEffect::WoodStep, 0.8f);
+                    } else {
+                        sleepTimer += dt;
+
+                        // Minecraft-style sleeping animation sequence:
+                        // 0.0s - 0.8s: Smoothly ease camera onto bed and pitch upward, fade to black
+                        // 0.8s - 1.6s: Full black, accelerate time to dawn, restore health and hunger
+                        // 1.6s - 2.5s: Fade in morning sunlight, tilt camera back
+                        // 2.5s+: Wake up standing beside bed
+
+                        glm::vec3 bedTargetCam = sleepingBedPos + glm::vec3(0.0f, 0.55f, 0.0f);
+                        glm::vec3 headStartCam = preSleepPlayerPos + glm::vec3(0.0f, player.getEyeHeight(), 0.0f);
+
+                        if (sleepTimer < 0.8f) {
+                            float u = sleepTimer / 0.8f;
+                            u = u * u * (3.0f - 2.0f * u); // Smoothstep
+                            glm::vec3 curCamPos = glm::mix(headStartCam, bedTargetCam, u);
+                            float curPitch = glm::mix(preSleepPitch, 0.80f, u); // Look up while lying down
+                            player.getCamera().setPosition(curCamPos);
+                            player.getCamera().setPitch(curPitch);
+                            sleepFadeAlpha = std::clamp((sleepTimer - 0.15f) / 0.65f, 0.0f, 1.0f);
+                        } else if (sleepTimer < 1.6f) {
+                            player.getCamera().setPosition(bedTargetCam);
+                            player.getCamera().setPitch(0.80f);
+                            sleepFadeAlpha = 1.0f;
+
+                            // Transition world to morning dawn at midpoint
+                            int curTicks = static_cast<int>(timeOfDay * 24000.0f) % 24000;
+                            if (sleepTimer >= 1.2f && (curTicks >= 12000 || curTicks <= 1000)) {
+                                timeOfDay = 1000.0f / 24000.0f; // Morning dawn (1000 ticks)
+                                if (curTicks >= 12000) gameDay++;
+                                player.setHealth(20.0f);
+                                player.setHunger(20.0f);
+                            }
+                        } else if (sleepTimer < 2.5f) {
+                            float u = (sleepTimer - 1.6f) / 0.9f;
+                            u = u * u * (3.0f - 2.0f * u);
+                            glm::vec3 curCamPos = glm::mix(bedTargetCam, headStartCam, u);
+                            float curPitch = glm::mix(0.80f, 0.0f, u);
+                            player.getCamera().setPosition(curCamPos);
+                            player.getCamera().setPitch(curPitch);
+                            sleepFadeAlpha = 1.0f - u;
+                        } else {
+                            // Awakening complete
+                            isSleeping = false;
+                            sleepTimer = 0.0f;
+                            sleepFadeAlpha = 0.0f;
+                            player.setPosition(preSleepPlayerPos);
+                            player.getCamera().setPosition(headStartCam);
+                            player.getCamera().setPitch(0.0f);
+                            chatFeedback = "Good morning!";
+                            chatFeedbackTimer = 3.0f;
+                            AudioEngine::get().playSound(SoundEffect::Click, 1.0f);
+                        }
+
+                        // Keep world chunks and entities updating
+                        world->update(sleepingBedPos, dt);
+                        itemDropManager.update(dt, *world, player);
+                        fallingBlockManager.update(dt, *world);
+                    }
+                } else {
+                    // F6 to toggle Spectator Free Cam
                 if (Input::isKeyPressed(GLFW_KEY_F6)) {
                     player.getCamera().toggleFreeCam();
                     if (player.getCamera().getMode() != CameraMode::FreeCam) {
@@ -829,12 +1120,21 @@ void run() {
                 // Raycast for targeted block
                 targetHit = Raycast::cast(*world, player.getCamera().getPosition(), player.getCamera().getForward(), 6.0f);
 
+                // Middle click to pick block
+                if (Input::isMouseButtonPressed(GLFW_MOUSE_BUTTON_MIDDLE) && targetHit.has_value()) {
+                    Cell picked = world->getCell(targetHit->hitCell.x, targetHit->hitCell.y, targetHit->hitCell.z, targetHit->hitCell.s);
+                    if (picked.type != BlockType::Air) {
+                        player.setHotbarBlock(player.getSelectedSlot(), picked.type, 64);
+                        AudioEngine::get().playSound(SoundEffect::ItemPop);
+                    }
+                }
+
                 // Left click ALWAYS triggers punch/hit animation (air or block)
                 if (Input::isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT)) {
                     player.triggerSwing();
                 }
 
-                // Mining / Breaking Blocks (with suited tool speed advantages & crack stages 0-9)
+                // Mining / Breaking Blocks (instant in creative, suited tool speeds in survival)
                 if (Input::isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT) && targetHit.has_value()) {
                     const CellCoord& hit = targetHit->hitCell;
 
@@ -847,20 +1147,93 @@ void run() {
 
                     miningTimer += dt;
                     Cell targetCell = world->getCell(hit.x, hit.y, hit.z, hit.s);
-                    float breakDuration = calculateBreakDuration(targetCell.type, player.getSelectedBlock());
-                    crackStage = std::clamp(static_cast<int>((miningTimer / breakDuration) * 10.0f), 0, 9);
+                    float breakDuration = player.isCreative() ? 0.0f : calculateBreakDuration(targetCell.type, player.getSelectedBlock());
+                    crackStage = (breakDuration > 0.0f) ? std::clamp(static_cast<int>((miningTimer / breakDuration) * 10.0f), 0, 9) : 0;
 
                     if (miningTimer >= breakDuration) {
                         Cell broken = world->getCell(hit.x, hit.y, hit.z, hit.s);
                         world->setCellInstant(hit.x, hit.y, hit.z, hit.s, Cell{BlockType::Air});
                         AudioEngine::get().playBlockDig(static_cast<int>(broken.type), 0.9f);
 
-                        // Spawn miniature 3D drop entity
-                        glm::vec3 dropPos = cellToWorldCenter(hit.x, hit.y, hit.z, hit.s);
-                        itemDropManager.spawnDrop(dropPos, broken.type);
+                        // Spawn miniature 3D drop entity (Survival only)
+                        if (!player.isCreative()) {
+                            glm::vec3 dropPos = cellToWorldCenter(hit.x, hit.y, hit.z, hit.s);
+                            itemDropManager.spawnDrop(dropPos, broken.type);
+                        }
 
                         // Trigger gravity physics for Sand and Gravel blocks above the broken block
                         world->checkGravity(hit.x, hit.y + 1, hit.z, hit.s, &fallingBlockManager);
+
+                        // If broken block was a Door, break the partner half
+                        if (broken.isDoor()) {
+                            bool isUpper = broken.isDoorUpper();
+                            int partnerY = hit.y + (isUpper ? -1 : 1);
+                            Cell partner = world->getCell(hit.x, partnerY, hit.z, hit.s);
+                            if (partner.isDoor()) {
+                                world->setCellInstant(hit.x, partnerY, hit.z, hit.s, Cell{BlockType::Air});
+                            }
+                        }
+                        // If broken block was a Bed, break all 4 cells of the bed
+                        if (broken.isBed()) {
+                            CellCoord bedCells[4];
+                            getBedAllCells(hit.x, hit.y, hit.z, hit.s, broken.level, bedCells);
+                            for (int i = 0; i < 4; ++i) {
+                                if (world->getCell(bedCells[i].x, bedCells[i].y, bedCells[i].z, bedCells[i].s).isBed()) {
+                                    world->setCellInstant(bedCells[i].x, bedCells[i].y, bedCells[i].z, bedCells[i].s, Cell{BlockType::Air});
+                                }
+                            }
+                        }
+
+                        // Pop off dependent blocks supported by this broken block
+                        // 1. Blocks resting directly on top of this block
+                        Cell aboveCell = world->getCell(hit.x, hit.y + 1, hit.z, hit.s);
+                        if (aboveCell.isTorch() && aboveCell.level == 0) {
+                            world->setCellInstant(hit.x, hit.y + 1, hit.z, hit.s, Cell{BlockType::Air});
+                            itemDropManager.spawnDrop(cellToWorldCenter(hit.x, hit.y + 1, hit.z, hit.s), aboveCell.type);
+                        } else if (aboveCell.isLantern() && aboveCell.level == 0) {
+                            world->setCellInstant(hit.x, hit.y + 1, hit.z, hit.s, Cell{BlockType::Air});
+                            itemDropManager.spawnDrop(cellToWorldCenter(hit.x, hit.y + 1, hit.z, hit.s), aboveCell.type);
+                        } else if (aboveCell.isTrapdoor() && !aboveCell.isTrapdoorOpen()) {
+                            world->setCellInstant(hit.x, hit.y + 1, hit.z, hit.s, Cell{BlockType::Air});
+                            itemDropManager.spawnDrop(cellToWorldCenter(hit.x, hit.y + 1, hit.z, hit.s), aboveCell.type);
+                        } else if (aboveCell.isDoor() && !aboveCell.isDoorUpper()) {
+                            world->setCellInstant(hit.x, hit.y + 1, hit.z, hit.s, Cell{BlockType::Air});
+                            Cell topHalf = world->getCell(hit.x, hit.y + 2, hit.z, hit.s);
+                            if (topHalf.isDoor()) {
+                                world->setCellInstant(hit.x, hit.y + 2, hit.z, hit.s, Cell{BlockType::Air});
+                            }
+                            itemDropManager.spawnDrop(cellToWorldCenter(hit.x, hit.y + 1, hit.z, hit.s), aboveCell.type);
+                        } else if (aboveCell.isBed()) {
+                            CellCoord bedCells[4];
+                            getBedAllCells(hit.x, hit.y + 1, hit.z, hit.s, aboveCell.level, bedCells);
+                            for (int i = 0; i < 4; ++i) {
+                                if (world->getCell(bedCells[i].x, bedCells[i].y, bedCells[i].z, bedCells[i].s).isBed()) {
+                                    world->setCellInstant(bedCells[i].x, bedCells[i].y, bedCells[i].z, bedCells[i].s, Cell{BlockType::Air});
+                                }
+                            }
+                            itemDropManager.spawnDrop(cellToWorldCenter(hit.x, hit.y + 1, hit.z, hit.s), BlockType::Bed);
+                        }
+                        // 2. Wall torches mounted on lateral faces of this block
+                        CellCoord bNeighbors[5];
+                        getNeighbors(hit.x, hit.y, hit.z, hit.s, bNeighbors);
+                        // Neighbor 2: Base wall torch (mount level 1)
+                        Cell n2 = world->getCell(bNeighbors[2].x, bNeighbors[2].y, bNeighbors[2].z, bNeighbors[2].s);
+                        if (n2.isTorch() && n2.level == 1) {
+                            world->setCellInstant(bNeighbors[2].x, bNeighbors[2].y, bNeighbors[2].z, bNeighbors[2].s, Cell{BlockType::Air});
+                            itemDropManager.spawnDrop(cellToWorldCenter(bNeighbors[2].x, bNeighbors[2].y, bNeighbors[2].z, bNeighbors[2].s), n2.type);
+                        }
+                        // Neighbor 3: Left slanted wall torch (mount level 2)
+                        Cell n3 = world->getCell(bNeighbors[3].x, bNeighbors[3].y, bNeighbors[3].z, bNeighbors[3].s);
+                        if (n3.isTorch() && n3.level == 2) {
+                            world->setCellInstant(bNeighbors[3].x, bNeighbors[3].y, bNeighbors[3].z, bNeighbors[3].s, Cell{BlockType::Air});
+                            itemDropManager.spawnDrop(cellToWorldCenter(bNeighbors[3].x, bNeighbors[3].y, bNeighbors[3].z, bNeighbors[3].s), n3.type);
+                        }
+                        // Neighbor 4: Right slanted wall torch (mount level 3)
+                        Cell n4 = world->getCell(bNeighbors[4].x, bNeighbors[4].y, bNeighbors[4].z, bNeighbors[4].s);
+                        if (n4.isTorch() && n4.level == 3) {
+                            world->setCellInstant(bNeighbors[4].x, bNeighbors[4].y, bNeighbors[4].z, bNeighbors[4].s, Cell{BlockType::Air});
+                            itemDropManager.spawnDrop(cellToWorldCenter(bNeighbors[4].x, bNeighbors[4].y, bNeighbors[4].z, bNeighbors[4].s), n4.type);
+                        }
 
                         miningTimer = 0.0f;
                         currentMiningCell = std::nullopt;
@@ -904,14 +1277,14 @@ void run() {
                     bool canBlock = Input::isMouseButtonDown(GLFW_MOUSE_BUTTON_RIGHT);
                     if (canBlock && targetHit.has_value()) {
                         Cell targetC = world->getCell(targetHit->hitCell.x, targetHit->hitCell.y, targetHit->hitCell.z, targetHit->hitCell.s);
-                        if (targetC.type == BlockType::CraftingTable) canBlock = false;
+                        if (targetC.type == BlockType::CraftingTable || targetC.isDoor() || targetC.isBed()) canBlock = false;
                     }
                     player.setBlocking(canBlock);
                 } else {
                     player.setBlocking(false);
                 }
 
-                // Right Click Handling (Crafting Table interaction or Block/Flower/Torch Placement)
+                // Right Click Handling (Crafting Table, Door, Bed interaction, or Block Placement)
                 if (heldItem != BlockType::ItemBow && !player.isBlocking() && Input::isMouseButtonPressed(GLFW_MOUSE_BUTTON_RIGHT) && targetHit.has_value()) {
                     CellCoord hitCell = targetHit->hitCell;
                     Cell hitBlock = world->getCell(hitCell.x, hitCell.y, hitCell.z, hitCell.s);
@@ -921,13 +1294,213 @@ void run() {
                         state = GameState::CraftingTable;
                         window.setCursorMode(false);
                         AudioEngine::get().playSound(SoundEffect::Click);
+                    } else if (hitBlock.isDoor()) {
+                        // Toggle door open/closed state on both vertical halves
+                        bool isUpper = hitBlock.isDoorUpper();
+                        int partnerY = hitCell.y + (isUpper ? -1 : 1);
+                        Cell partner = world->getCell(hitCell.x, partnerY, hitCell.z, hitCell.s);
+
+                        uint8_t newLevel = hitBlock.level ^ 8; // toggle open bit
+                        world->setCellInstant(hitCell.x, hitCell.y, hitCell.z, hitCell.s, Cell{hitBlock.type, newLevel});
+
+                        if (partner.isDoor()) {
+                            uint8_t partnerNewLevel = partner.level ^ 8;
+                            world->setCellInstant(hitCell.x, partnerY, hitCell.z, hitCell.s, Cell{partner.type, partnerNewLevel});
+                        }
+                        AudioEngine::get().playSound(SoundEffect::WoodStep, 1.0f);
+                        player.triggerPlace();
+                    } else if (hitBlock.isTrapdoor()) {
+                        // Toggle trapdoor open/closed state
+                        uint8_t newLevel = hitBlock.level ^ 8;
+                        world->setCellInstant(hitCell.x, hitCell.y, hitCell.z, hitCell.s, Cell{hitBlock.type, newLevel});
+                        AudioEngine::get().playSound(SoundEffect::WoodStep, 1.0f);
+                        player.triggerPlace();
+                    } else if (hitBlock.isBed()) {
+                        // Set spawn point to this bed
+                        glm::vec3 spawnPos = cellToWorldCenter(hitCell.x, hitCell.y, hitCell.z, hitCell.s) + glm::vec3(0.0f, 0.6f, 0.0f);
+                        player.setSpawnPoint(spawnPos);
+
+                        // Check night time (12500 to 23500 ticks)
+                        int curTicks = static_cast<int>(timeOfDay * 24000.0f) % 24000;
+                        if (curTicks >= 12500 && curTicks <= 23500) {
+                            isSleeping = true;
+                            sleepTimer = 0.0f;
+                            sleepFadeAlpha = 0.0f;
+                            sleepingBedPos = cellToWorldCenter(hitCell.x, hitCell.y, hitCell.z, hitCell.s);
+                            preSleepPlayerPos = player.getPosition();
+                            preSleepPitch = player.getCamera().getPitch();
+                            preSleepYaw = player.getCamera().getYaw();
+                            chatFeedback = "Spawn point set. Sleeping...";
+                            chatFeedbackTimer = 2.0f;
+                            AudioEngine::get().playSound(SoundEffect::WoodStep, 0.9f);
+                        } else {
+                            chatFeedback = "Spawn point set. You can only sleep at night.";
+                            chatFeedbackTimer = 3.0f;
+                            AudioEngine::get().playSound(SoundEffect::Click, 0.8f);
+                        }
+                        player.triggerPlace();
                     } else {
                         CellCoord place = targetHit->placeCell;
                         BlockType b = player.getSelectedBlock();
                         if (b != BlockType::Air && !Cell{b}.isItem()) {
-                            // Foliage placement restriction (must be placed on grass or dirt)
                             bool canPlace = true;
-                            if (b == BlockType::FlowerRose || b == BlockType::FlowerDandelion || b == BlockType::TallGrass) {
+                            uint8_t placeLevel = 0;
+
+                            if (Cell{b}.isDoor()) {
+                                Cell below = world->getCell(place.x, place.y - 1, place.z, place.s);
+                                if (!below.isSolid() || place.y + 1 >= CHUNK_SIZE_Y) {
+                                    canPlace = false;
+                                } else {
+                                    Cell above = world->getCell(place.x, place.y + 1, place.z, place.s);
+                                    if (above.type != BlockType::Air) {
+                                        canPlace = false;
+                                    }
+                                }
+
+                                if (canPlace) {
+                                    glm::vec3 fwd = player.getCamera().getForward();
+                                    glm::vec2 fwd2(fwd.x, fwd.z);
+                                    if (glm::length(fwd2) > 0.001f) fwd2 = glm::normalize(fwd2);
+
+                                    glm::vec2 wallInNormals[3];
+                                    if (place.s == 0) {
+                                        wallInNormals[0] = glm::vec2(0.0f, 1.0f);            // Base wall
+                                        wallInNormals[1] = glm::vec2(SQRT_3_OVER_2, -0.5f);  // Left wall
+                                        wallInNormals[2] = glm::vec2(-SQRT_3_OVER_2, -0.5f); // Right wall
+                                    } else {
+                                        wallInNormals[0] = glm::vec2(0.0f, -1.0f);           // Base wall
+                                        wallInNormals[1] = glm::vec2(SQRT_3_OVER_2, 0.5f);   // Left wall
+                                        wallInNormals[2] = glm::vec2(-SQRT_3_OVER_2, 0.5f);  // Right wall
+                                    }
+
+                                    float maxDot = -999.0f;
+                                    int bestFacing = 0;
+                                    for (int i = 0; i < 3; ++i) {
+                                        float d = glm::dot(fwd2, wallInNormals[i]);
+                                        if (d > maxDot) {
+                                            maxDot = d;
+                                            bestFacing = i;
+                                        }
+                                    }
+
+                                    uint8_t lowerLevel = static_cast<uint8_t>(bestFacing & 3);
+                                    uint8_t upperLevel = static_cast<uint8_t>((bestFacing & 3) | 4);
+
+                                    world->setCellInstant(place.x, place.y, place.z, place.s, Cell{b, lowerLevel});
+                                    world->setCellInstant(place.x, place.y + 1, place.z, place.s, Cell{b, upperLevel});
+                                    player.consumeSelectedItem();
+                                    player.triggerPlace();
+                                    AudioEngine::get().playBlockStep(static_cast<int>(b), 0.9f);
+                                    continue;
+                                }
+                            } else if (b == BlockType::Bed) {
+                                int xF = place.x, zF = place.z, yF = place.y;
+                                glm::vec3 fwd = player.getCamera().getForward();
+                                float ax = std::abs(fwd.x);
+                                float az = std::abs(fwd.z);
+                                uint8_t facing = 0;
+                                int rowParity = floorMod(zF, 2);
+                                int xH = xF, zH = zF;
+
+                                if (ax >= az) {
+                                    if (fwd.x >= 0.0f) { facing = 0; xH = xF + 1; zH = zF; }
+                                    else               { facing = 1; xH = xF - 1; zH = zF; }
+                                } else {
+                                    if (fwd.z >= 0.0f) { facing = 2; xH = (rowParity == 0 ? xF : xF + 1); zH = zF + 1; }
+                                    else               { facing = 3; xH = (rowParity == 0 ? xF - 1 : xF); zH = zF - 1; }
+                                }
+
+                                // Check all 4 cells are Air and support below is solid
+                                Cell f0 = world->getCell(xF, yF, zF, 0);
+                                Cell f1 = world->getCell(xF, yF, zF, 1);
+                                Cell h0 = world->getCell(xH, yF, zH, 0);
+                                Cell h1 = world->getCell(xH, yF, zH, 1);
+
+                                Cell f0_below = world->getCell(xF, yF - 1, zF, 0);
+                                Cell f1_below = world->getCell(xF, yF - 1, zF, 1);
+                                Cell h0_below = world->getCell(xH, yF - 1, zH, 0);
+                                Cell h1_below = world->getCell(xH, yF - 1, zH, 1);
+
+                                if (f0.type != BlockType::Air || f1.type != BlockType::Air ||
+                                    h0.type != BlockType::Air || h1.type != BlockType::Air ||
+                                    !f0_below.isSolid() || !f1_below.isSolid() ||
+                                    !h0_below.isSolid() || !h1_below.isSolid()) {
+                                    canPlace = false;
+                                } else {
+                                    uint8_t footLevel0 = static_cast<uint8_t>((facing << 2) | (0 << 1) | 0);
+                                    uint8_t footLevel1 = static_cast<uint8_t>((facing << 2) | (1 << 1) | 0);
+                                    uint8_t headLevel0 = static_cast<uint8_t>((facing << 2) | (0 << 1) | 1);
+                                    uint8_t headLevel1 = static_cast<uint8_t>((facing << 2) | (1 << 1) | 1);
+
+                                    world->setCellInstant(xF, yF, zF, 0, Cell{b, footLevel0});
+                                    world->setCellInstant(xF, yF, zF, 1, Cell{b, footLevel1});
+                                    world->setCellInstant(xH, yF, zH, 0, Cell{b, headLevel0});
+                                    world->setCellInstant(xH, yF, zH, 1, Cell{b, headLevel1});
+
+                                    player.consumeSelectedItem();
+                                    player.triggerPlace();
+                                    AudioEngine::get().playBlockStep(static_cast<int>(b), 0.9f);
+                                    continue;
+                                }
+                            } else if (Cell{b}.isTorch()) {
+                                CellCoord placeNeighbors[5];
+                                getNeighbors(place.x, place.y, place.z, place.s, placeNeighbors);
+                                Cell hitBlockCell = world->getCell(hitCell.x, hitCell.y, hitCell.z, hitCell.s);
+
+                                if (!hitBlockCell.isSolid()) {
+                                    canPlace = false;
+                                } else if (placeNeighbors[1] == hitCell) {
+                                    // Placed on top face of hitCell (Floor torch)
+                                    placeLevel = 0;
+                                } else if (placeNeighbors[2] == hitCell) {
+                                    // Attached to Base wall
+                                    placeLevel = 1;
+                                } else if (placeNeighbors[3] == hitCell) {
+                                    // Attached to Left slanted wall
+                                    placeLevel = 2;
+                                } else if (placeNeighbors[4] == hitCell) {
+                                    // Attached to Right slanted wall
+                                    placeLevel = 3;
+                                } else {
+                                    // Ceiling or non-adjacent face
+                                    canPlace = false;
+                                }
+                            } else if (Cell{b}.isTrapdoor()) {
+                                // Determine facing wall (0 = Base, 1 = Left, 2 = Right)
+                                CellCoord placeNeighbors[5];
+                                getNeighbors(place.x, place.y, place.z, place.s, placeNeighbors);
+                                uint8_t facing = 0;
+                                if (placeNeighbors[2] == hitCell) facing = 0;
+                                else if (placeNeighbors[3] == hitCell) facing = 1;
+                                else if (placeNeighbors[4] == hitCell) facing = 2;
+                                else {
+                                    glm::vec3 fwd = player.getCamera().getForward();
+                                    glm::vec2 vXZ[3];
+                                    getPrismVerticesXZ(place.x, place.z, place.s, vXZ);
+                                    glm::vec2 cent = (vXZ[0] + vXZ[1] + vXZ[2]) / 3.0f;
+                                    glm::vec2 m0 = (vXZ[0] + vXZ[1]) * 0.5f - cent;
+                                    glm::vec2 m1 = (vXZ[0] + vXZ[2]) * 0.5f - cent;
+                                    glm::vec2 m2 = (vXZ[1] + vXZ[2]) * 0.5f - cent;
+                                    float d0 = glm::dot(glm::vec2(fwd.x, fwd.z), m0);
+                                    float d1 = glm::dot(glm::vec2(fwd.x, fwd.z), m1);
+                                    float d2 = glm::dot(glm::vec2(fwd.x, fwd.z), m2);
+                                    if (d0 >= d1 && d0 >= d2) facing = 0;
+                                    else if (d1 >= d0 && d1 >= d2) facing = 1;
+                                    else facing = 2;
+                                }
+                                placeLevel = facing; // Closed by default, facing in bits 0..1
+                            } else if (Cell{b}.isLantern()) {
+                                Cell below = world->getCell(place.x, place.y - 1, place.z, place.s);
+                                Cell above = world->getCell(place.x, place.y + 1, place.z, place.s);
+                                if (below.isSolid()) {
+                                    placeLevel = 0; // Sitting on floor
+                                } else if (above.isSolid()) {
+                                    placeLevel = 1; // Hanging from ceiling
+                                } else {
+                                    canPlace = false;
+                                }
+                            } else if (Cell{b}.isFoliage()) {
+                                // Foliage placement restriction (must be placed on grass or dirt)
                                 Cell below = world->getCell(place.x, place.y - 1, place.z, place.s);
                                 if (below.type != BlockType::Grass && below.type != BlockType::Dirt) {
                                     canPlace = false;
@@ -935,7 +1508,7 @@ void run() {
                             }
 
                             if (canPlace) {
-                                world->setCellInstant(place.x, place.y, place.z, place.s, Cell{b});
+                                world->setCellInstant(place.x, place.y, place.z, place.s, Cell{b, placeLevel});
                                 player.consumeSelectedItem();
                                 player.triggerPlace();
                                 AudioEngine::get().playBlockStep(static_cast<int>(b), 0.9f);
@@ -949,17 +1522,16 @@ void run() {
                     }
                 }
             }
-        } else if (state == GameState::MainMenu) {
+        }
+    } else if (state == GameState::MainMenu) {
             if (Input::isMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT)) {
                 int action = menuRenderer.handleClick(state, player, uiMousePos, uiW, uiH, currentSeed, options);
-                if (action == 1) { // Play / Singleplayer
-                    state = GameState::LoadingWorld;
-                    loadingProgress = 0.0f;
-                    loadingLoadedChunks = 0;
-                    loadingTotalChunks = 81;
-                    window.setCursorMode(false);
+                if (action == 12) { // Open World Select
+                    menuRenderer.refreshWorldList();
+                    state = GameState::WorldSelect;
                     AudioEngine::get().playSound(SoundEffect::Click);
                 } else if (action == 2) { // Open World Creation
+                    menuRenderer.setCreationFieldFocus(0);
                     AudioEngine::get().playSound(SoundEffect::Click);
                 } else if (action == 5) { // Quit
                     AudioEngine::get().playSound(SoundEffect::Click);
@@ -968,22 +1540,103 @@ void run() {
                     AudioEngine::get().playSound(SoundEffect::Click);
                 }
             }
+        } else if (state == GameState::WorldSelect) {
+            float scroll = Input::getScrollDelta();
+            if (scroll > 0.1f) menuRenderer.handleWorldListScroll(1);
+            else if (scroll < -0.1f) menuRenderer.handleWorldListScroll(-1);
+            if (Input::isKeyPressed(GLFW_KEY_UP)) menuRenderer.handleWorldListScroll(1);
+            if (Input::isKeyPressed(GLFW_KEY_DOWN)) menuRenderer.handleWorldListScroll(-1);
+            if (Input::isKeyPressed(GLFW_KEY_ESCAPE)) {
+                state = GameState::MainMenu;
+                AudioEngine::get().playSound(SoundEffect::Click);
+            }
+
+            if (Input::isMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT)) {
+                int action = menuRenderer.handleClick(state, player, uiMousePos, uiW, uiH, currentSeed, options);
+                if (action == 13) { // Play Selected World
+                    const auto& worlds = menuRenderer.getWorldList();
+                    int idx = menuRenderer.getSelectedWorldIndex();
+                    if (idx >= 0 && idx < static_cast<int>(worlds.size())) {
+                        const auto& meta = worlds[idx];
+                        currentWorldFolder = meta.folderName;
+                        currentSeed = meta.seed;
+                        world = std::make_unique<World>(context, commandQueue, currentSeed, currentWorldFolder);
+                        world->renderDistance = options.renderDistance;
+                        world->lodDistance = options.lodDistance;
+                        world->lodPreset = options.lodPreset;
+                        world->setRamCacheSize(options.ramCacheSize);
+
+                        // Restore player state
+                        player.setPosition(meta.playerPos);
+                        player.getCamera().setYaw(meta.yaw);
+                        player.getCamera().setPitch(meta.pitch);
+                        player.getCamera().farPlane = std::max(500.0f, static_cast<float>(options.lodDistance) * 16.0f * 1.42f);
+                        player.setHealth(meta.health);
+                        player.setHunger(meta.hunger);
+                        player.setSelectedSlot(meta.selectedSlot);
+                        player.setCreative(meta.gameMode == 1);
+                        timeOfDay = meta.timeOfDay;
+
+                        player.clearInventory();
+                        for (const auto& s : meta.inventory) {
+                            if (s.slot >= 0 && s.slot < 10) {
+                                player.setHotbarBlock(s.slot, s.type, s.count);
+                            } else if (s.slot >= 10 && s.slot < 40) {
+                                player.setStorageSlot(s.slot - 10, s.type, s.count);
+                            }
+                        }
+
+                        state = GameState::LoadingWorld;
+                        loadingProgress = 0.0f;
+                        loadingLoadedChunks = 0;
+                        loadingTotalChunks = 81;
+                        window.setCursorMode(false);
+                        AudioEngine::get().playSound(SoundEffect::Click);
+                    }
+                } else if (action == 2) { // Create New World
+                    menuRenderer.setCreationFieldFocus(0);
+                    AudioEngine::get().playSound(SoundEffect::Click);
+                } else if (action == 4) { // Back to title
+                    state = GameState::MainMenu;
+                    AudioEngine::get().playSound(SoundEffect::Click);
+                }
+            }
         } else if (state == GameState::WorldCreation) {
+            for (char c : Input::getTypedChars()) {
+                menuRenderer.handleWorldCreationChar(c);
+            }
+            if (Input::isKeyPressed(GLFW_KEY_BACKSPACE)) {
+                menuRenderer.handleWorldCreationBackspace();
+            }
+            if (Input::isKeyPressed(GLFW_KEY_ESCAPE)) {
+                state = GameState::WorldSelect;
+                AudioEngine::get().playSound(SoundEffect::Click);
+            }
+
             if (Input::isMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT)) {
                 int action = menuRenderer.handleClick(state, player, uiMousePos, uiW, uiH, currentSeed, options);
                 if (action == 3) { // Generate & Start World
-                    world = std::make_unique<World>(context, commandQueue, currentSeed);
+                    WorldMetadata outMeta;
+                    SaveManager::createWorld(menuRenderer.getNewWorldName(), currentSeed, menuRenderer.isStartInCreative(), outMeta);
+                    currentWorldFolder = outMeta.folderName;
+                    currentSeed = outMeta.seed;
+
+                    world = std::make_unique<World>(context, commandQueue, currentSeed, currentWorldFolder);
                     world->renderDistance = options.renderDistance;
+                    world->lodDistance = options.lodDistance;
                     world->lodPreset = options.lodPreset;
+                    world->setRamCacheSize(options.ramCacheSize);
+                    player.getCamera().farPlane = std::max(500.0f, static_cast<float>(options.lodDistance) * 16.0f * 1.42f);
                     player.resetToStarterInventory();
+                    player.setCreative(menuRenderer.isStartInCreative());
                     state = GameState::LoadingWorld;
                     loadingProgress = 0.0f;
                     loadingLoadedChunks = 0;
                     loadingTotalChunks = 81;
                     window.setCursorMode(false);
                     AudioEngine::get().playSound(SoundEffect::Click);
-                } else if (action == 4) { // Back to Main Menu
-                    state = GameState::MainMenu;
+                } else if (action == 4) { // Back to WorldSelect
+                    state = GameState::WorldSelect;
                     AudioEngine::get().playSound(SoundEffect::Click);
                 }
             }
@@ -1005,12 +1658,15 @@ void run() {
             }
 
             if (ready) {
-                spawnY = world->getHighestSolidY(0.5f, 0.5f);
-                player.respawn(glm::vec3(0.5f, spawnY + 2.5f, 0.5f));
+                float highY = world->getHighestSolidY(player.getPosition().x, player.getPosition().z);
+                if (player.getPosition().y < highY || player.getPosition().y > highY + 20.0f) {
+                    player.setPosition(glm::vec3(player.getPosition().x, highY + 2.5f, player.getPosition().z));
+                }
                 state = GameState::Playing;
                 window.setCursorMode(true);
                 lastLoggedLoaded = -1;
-                std::cout << "[Loading] World loaded! Entering gameplay at spawn Y=" << spawnY << std::endl;
+                std::cout << "[Loading] World loaded! Entering gameplay at ("
+                          << player.getPosition().x << ", " << player.getPosition().y << ", " << player.getPosition().z << ")" << std::endl;
             }
         } else if (state == GameState::Paused) {
             if (Input::isKeyPressed(GLFW_KEY_ESCAPE)) {
@@ -1024,11 +1680,18 @@ void run() {
                     state = GameState::Playing;
                     window.setCursorMode(true);
                     AudioEngine::get().playSound(SoundEffect::Click);
-                } else if (action == 4) { // Title screen
+                } else if (action == 4) { // Save & Title screen
+                    if (world) {
+                        world->saveAll(player, timeOfDay);
+                    }
+                    menuRenderer.refreshWorldList();
                     state = GameState::MainMenu;
                     window.setCursorMode(false);
                     AudioEngine::get().playSound(SoundEffect::Click);
                 } else if (action == 5) { // Quit
+                    if (world) {
+                        world->saveAll(player, timeOfDay);
+                    }
                     AudioEngine::get().playSound(SoundEffect::Click);
                     break;
                 } else if (action == 6) { // Options
@@ -1045,12 +1708,14 @@ void run() {
             bool isPressed = Input::isMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT);
             if (isDown) {
                 int action = menuRenderer.handleClick(state, player, uiMousePos, uiW, uiH, currentSeed, options, !isPressed);
-                if (action >= 7 && action <= 25) {
+                if (action >= 7 && action <= 30) {
                     player.getCamera().fov = static_cast<float>(options.fov);
                     player.mouseSensitivity = options.mouseSens;
                     AudioEngine::get().setMasterVolume(options.audioVolume);
                     world->renderDistance = options.renderDistance;
+                    world->lodDistance = options.lodDistance;
                     world->lodPreset = options.lodPreset;
+                    player.getCamera().farPlane = std::max(500.0f, static_cast<float>(options.lodDistance) * 16.0f * 1.42f);
                     if (swapchain.isVSyncEnabled() != options.vsync) {
                         swapchain.setVSync(options.vsync, window.getWidth(), window.getHeight());
                     }
@@ -1068,10 +1733,13 @@ void run() {
                                 swapchain.recreate(window.getWidth(), window.getHeight());
                             }
                         }
-                        auto [targetRenderW, targetRenderH] = computeRenderResolution(options.resIndex, window.getWidth(), window.getHeight());
+                        auto [targetRenderW, targetRenderH] = computeInternalResolution(options, window.getWidth(), window.getHeight());
                         if (targetRenderW != postProcessRenderer.getWidth() || targetRenderH != postProcessRenderer.getHeight()) {
                             postProcessRenderer.recreate(targetRenderW, targetRenderH);
                             updateWaterDescriptorSets();
+                        }
+                        if (window.getWidth() != tsrRenderer.getDisplayWidth() || window.getHeight() != tsrRenderer.getDisplayHeight()) {
+                            tsrRenderer.recreate(window.getWidth(), window.getHeight());
                         }
                     }
                     ConfigManager::save(options, exeDir + "options.txt");
@@ -1090,25 +1758,30 @@ void run() {
             if (isDown) {
                 int action = menuRenderer.handleClick(state, player, uiMousePos, uiW, uiH, currentSeed, options, !isPressed);
                 if (action != 0) {
-                    if (action == 13 || action == 14) {
+                    if (action == 13 || action == 14 || action == 30) {
                         if (action == 13) {
                             int targetW = (options.resIndex < 4) ? resList[options.resIndex][0] : window.getWidth();
                             int targetH = (options.resIndex < 4) ? resList[options.resIndex][1] : window.getHeight();
                             window.setWindowMode(options.windowMode, targetW, targetH, window.getRefreshRate());
                             swapchain.recreate(window.getWidth(), window.getHeight());
+                            tsrRenderer.recreate(window.getWidth(), window.getHeight());
                         } else if (action == 14) {
                             if (options.windowMode == 0) {
                                 int targetW = (options.resIndex < 4) ? resList[options.resIndex][0] : window.getWidth();
                                 int targetH = (options.resIndex < 4) ? resList[options.resIndex][1] : window.getHeight();
                                 window.setWindowMode(0, targetW, targetH, window.getRefreshRate());
                                 swapchain.recreate(window.getWidth(), window.getHeight());
+                                tsrRenderer.recreate(window.getWidth(), window.getHeight());
                             }
                         }
-                        auto [targetRenderW, targetRenderH] = computeRenderResolution(options.resIndex, window.getWidth(), window.getHeight());
+                        auto [targetRenderW, targetRenderH] = computeInternalResolution(options, window.getWidth(), window.getHeight());
                         if (targetRenderW != postProcessRenderer.getWidth() || targetRenderH != postProcessRenderer.getHeight()) {
                             postProcessRenderer.recreate(targetRenderW, targetRenderH);
                             updateWaterDescriptorSets();
                         }
+                        tsrRenderer.resetHistory();
+                    } else if (action == 32) {
+                        world->setRamCacheSize(options.ramCacheSize);
                     }
                     if (swapchain.isVSyncEnabled() != options.vsync) {
                         swapchain.setVSync(options.vsync, window.getWidth(), window.getHeight());
@@ -1120,7 +1793,41 @@ void run() {
                         currentCloudSeed = options.cloudSeed;
                     }
                     world->renderDistance = options.renderDistance;
+                    world->lodDistance = options.lodDistance;
                     world->lodPreset = options.lodPreset;
+                    player.getCamera().farPlane = std::max(500.0f, static_cast<float>(options.lodDistance) * 16.0f * 1.42f);
+                    ConfigManager::save(options, exeDir + "options.txt");
+                }
+            }
+        } else if (state == GameState::LODSettings) {
+            if (Input::isKeyPressed(GLFW_KEY_ESCAPE)) {
+                state = GameState::Options;
+                AudioEngine::get().playSound(SoundEffect::Click);
+                ConfigManager::save(options, exeDir + "options.txt");
+            }
+            bool isDown = Input::isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT);
+            bool isPressed = Input::isMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT);
+            if (isDown) {
+                int action = menuRenderer.handleClick(state, player, uiMousePos, uiW, uiH, currentSeed, options, !isPressed);
+                if (action != 0) {
+                    world->renderDistance = options.renderDistance;
+                    world->lodDistance = options.lodDistance;
+                    world->lodPreset = options.lodPreset;
+                    player.getCamera().farPlane = std::max(500.0f, static_cast<float>(options.lodDistance) * 16.0f * 1.42f);
+                    ConfigManager::save(options, exeDir + "options.txt");
+                }
+            }
+        } else if (state == GameState::VibrantVisualsSettings) {
+            if (Input::isKeyPressed(GLFW_KEY_ESCAPE)) {
+                state = GameState::Options;
+                AudioEngine::get().playSound(SoundEffect::Click);
+                ConfigManager::save(options, exeDir + "options.txt");
+            }
+            bool isDown = Input::isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT);
+            bool isPressed = Input::isMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT);
+            if (isDown) {
+                int action = menuRenderer.handleClick(state, player, uiMousePos, uiW, uiH, currentSeed, options, !isPressed);
+                if (action != 0) {
                     ConfigManager::save(options, exeDir + "options.txt");
                 }
             }
@@ -1154,11 +1861,32 @@ void run() {
                 }
             }
         } else if (state == GameState::Inventory) {
-            if (Input::isKeyPressed(GLFW_KEY_E) || Input::isKeyPressed(GLFW_KEY_ESCAPE)) {
-                menuRenderer.returnCraftingItems(player);
-                state = GameState::Playing;
-                window.setCursorMode(true);
-                AudioEngine::get().playSound(SoundEffect::Click);
+            if (player.isCreative()) {
+                for (char c : Input::getTypedChars()) {
+                    menuRenderer.handleCreativeChar(c);
+                }
+                if (Input::isKeyPressed(GLFW_KEY_BACKSPACE)) {
+                    menuRenderer.handleCreativeBackspace();
+                }
+                float scroll = Input::getScrollDelta();
+                if (scroll > 0.1f) menuRenderer.handleCreativeScroll(-1);
+                else if (scroll < -0.1f) menuRenderer.handleCreativeScroll(1);
+                if (Input::isKeyPressed(GLFW_KEY_UP)) menuRenderer.handleCreativeScroll(-1);
+                if (Input::isKeyPressed(GLFW_KEY_DOWN)) menuRenderer.handleCreativeScroll(1);
+
+                if (Input::isKeyPressed(GLFW_KEY_ESCAPE) || (menuRenderer.getCreativeSearchQuery().empty() && Input::isKeyPressed(GLFW_KEY_E))) {
+                    menuRenderer.returnCraftingItems(player);
+                    state = GameState::Playing;
+                    window.setCursorMode(true);
+                    AudioEngine::get().playSound(SoundEffect::Click);
+                }
+            } else {
+                if (Input::isKeyPressed(GLFW_KEY_E) || Input::isKeyPressed(GLFW_KEY_ESCAPE)) {
+                    menuRenderer.returnCraftingItems(player);
+                    state = GameState::Playing;
+                    window.setCursorMode(true);
+                    AudioEngine::get().playSound(SoundEffect::Click);
+                }
             }
             bool leftPressed = Input::isMouseButtonPressed(GLFW_MOUSE_BUTTON_LEFT);
             bool rightPressed = Input::isMouseButtonPressed(GLFW_MOUSE_BUTTON_RIGHT);
@@ -1201,7 +1929,8 @@ void run() {
         uint32_t imageIndex = commandQueue.beginFrame(swapchain);
         if (imageIndex == UINT32_MAX) {
             swapchain.recreate(window.getWidth(), window.getHeight());
-            auto [targetRenderW, targetRenderH] = computeRenderResolution(options.resIndex, window.getWidth(), window.getHeight());
+            tsrRenderer.recreate(window.getWidth(), window.getHeight());
+            auto [targetRenderW, targetRenderH] = computeInternalResolution(options, window.getWidth(), window.getHeight());
             if (targetRenderW != postProcessRenderer.getWidth() || targetRenderH != postProcessRenderer.getHeight()) {
                 postProcessRenderer.recreate(targetRenderW, targetRenderH);
                 updateWaterDescriptorSets();
@@ -1213,22 +1942,42 @@ void run() {
 
         float aspect = static_cast<float>(swapchain.getExtent().width) / static_cast<float>(swapchain.getExtent().height);
 
-        glm::mat4 view, proj, vp;
+        static uint32_t tsrFrameIndex = 0;
+        static glm::mat4 prevViewProj = glm::mat4(1.0f);
+        static bool firstTsrFrame = true;
+
+        glm::vec2 jitterOffset(0.0f, 0.0f);
+        glm::mat4 view, proj, unjitteredProj, vp, unjitteredVp;
         glm::vec3 camPos;
         Frustum frustum;
         if (state == GameState::MainMenu) {
             float camRadius = 45.0f;
             camPos = glm::vec3(std::cos(menuCamAngle) * camRadius, 85.0f, std::sin(menuCamAngle) * camRadius);
             view = glm::lookAt(camPos, glm::vec3(0.0f, 65.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-            proj = glm::perspective(glm::radians(75.0f), aspect, 0.1f, 500.0f);
+            unjitteredProj = glm::perspective(glm::radians(75.0f), aspect, 0.1f, 500.0f);
+            proj = unjitteredProj;
             frustum = player.getCamera().getFrustum(aspect);
         } else {
             camPos = player.getCamera().getRenderPosition();
             view = player.getCamera().getViewMatrix();
-            proj = player.getCamera().getProjectionMatrix(aspect);
+            unjitteredProj = player.getCamera().getProjectionMatrix(aspect);
             frustum = player.getCamera().getFrustum(aspect);
+
+            if (options.upscalerMode == 2) { // TSR Temporal Super Resolution
+                jitterOffset = Camera::getHaltonJitter(tsrFrameIndex++);
+                glm::vec2 renderRes(postProcessRenderer.getWidth(), postProcessRenderer.getHeight());
+                proj = player.getCamera().getJitteredProjectionMatrix(aspect, jitterOffset, renderRes);
+            } else {
+                proj = unjitteredProj;
+            }
         }
         vp = proj * view;
+        unjitteredVp = unjitteredProj * view;
+
+        if (firstTsrFrame) {
+            prevViewProj = unjitteredVp;
+            firstTsrFrame = false;
+        }
 
         PushConstants pc{};
         std::memcpy(pc.mvp, &vp[0][0], sizeof(float) * 16);
@@ -1556,7 +2305,9 @@ void run() {
 
             // Render Block Cracks (mining overlay stages 0-9)
             if (state == GameState::Playing && crackStage >= 0 && currentMiningCell.has_value()) {
-                crackRenderer.render(cmd, worldPipeline, currentMiningCell, crackStage, vp);
+                crackRenderer.render(cmd, crackPipeline, currentSceneDescSet, *world, currentMiningCell, crackStage, vp, pc);
+                worldPipeline.bind(cmd);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, worldPipeline.getLayout(), 0, 1, &currentSceneDescSet, 0, nullptr);
             }
 
             // Render 3D Floating Item Drops
@@ -1577,7 +2328,7 @@ void run() {
             if (state == GameState::Playing && targetHit.has_value()) {
                 outlineInvertPipeline.bind(cmd);
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, outlineInvertPipeline.getLayout(), 0, 1, &currentSceneDescSet, 0, nullptr);
-                outlineRenderer.render(cmd, outlineInvertPipeline, targetHit->hitCell, vp);
+                outlineRenderer.render(cmd, outlineInvertPipeline, targetHit->hitCell, vp, *world);
                 worldPipeline.bind(cmd);
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, worldPipeline.getLayout(), 0, 1, &currentSceneDescSet, 0, nullptr);
             }
@@ -1633,6 +2384,17 @@ void run() {
             // 5. Render First-Person Hand (after water and SSR copy so it is NEVER reflected in water)
             if (state == GameState::Playing || state == GameState::Paused || state == GameState::Inventory || state == GameState::CraftingTable) {
                 if (player.getCamera().getMode() == CameraMode::FirstPerson) {
+                    // Clear depth attachment so view-model hand and held items never clip through blocks/walls
+                    VkClearAttachment clearDepthAtt{};
+                    clearDepthAtt.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+                    clearDepthAtt.clearValue.depthStencil = { 1.0f, 0 };
+                    VkClearRect clearDepthRect{};
+                    clearDepthRect.rect.offset = { 0, 0 };
+                    clearDepthRect.rect.extent = swapchain.getExtent();
+                    clearDepthRect.baseArrayLayer = 0;
+                    clearDepthRect.layerCount = 1;
+                    vkCmdClearAttachments(cmd, 1, &clearDepthAtt, 1, &clearDepthRect);
+
                     worldPipeline.bind(cmd);
                     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, worldPipeline.getLayout(), 0, 1, &currentSceneDescSet, 0, nullptr);
                     handRenderer.render(cmd, worldPipeline, player, view, proj, pc, normPlayerSky, normPlayerTorch);
@@ -1643,28 +2405,8 @@ void run() {
         vkCmdEndRendering(cmd);
 
         // =============================================================
-        // Pass 2: Combined Post-Processing (HDR -> Swapchain) & 2D UI Pass
+        // Pass 2: Tonemap & Composite 3D Scene into LDR Target (render resolution)
         // =============================================================
-        postProcessRenderer.transitionHDRForSampling(cmd);
-        swapchain.transitionToColorAttachment(cmd, imageIndex);
-
-        VkRenderingAttachmentInfo swapchainColorAtt{};
-        swapchainColorAtt.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-        swapchainColorAtt.imageView = swapchain.getImageView(imageIndex);
-        swapchainColorAtt.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        swapchainColorAtt.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        swapchainColorAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-
-        VkRenderingInfo swapchainRenderInfo{};
-        swapchainRenderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-        swapchainRenderInfo.renderArea = {{ 0, 0 }, swapchain.getExtent()};
-        swapchainRenderInfo.layerCount = 1;
-        swapchainRenderInfo.colorAttachmentCount = 1;
-        swapchainRenderInfo.pColorAttachments = &swapchainColorAtt;
-        swapchainRenderInfo.pDepthAttachment = nullptr;
-
-        vkCmdBeginRendering(cmd, &swapchainRenderInfo);
-
         // Compute Sun Screen UV for Volumetric God Rays in Post-Processing
         float sunScreenU = 0.5f;
         float sunScreenV = 0.5f;
@@ -1672,25 +2414,71 @@ void run() {
         glm::vec3 camForward = (state == GameState::Playing) ? player.getCamera().getForward() : glm::normalize(glm::vec3(0.0f, 65.0f, 0.0f) - camPos);
         float sunDotForward = glm::dot(sunDir, camForward);
         // God rays occur selectively at lower sun angles (sunrise, morning, afternoon, sunset, golden hour)
-        // and when looking generally towards the sun. At high noon, god rays subside.
+        // when looking generally towards the sun, and NEVER when looking down at the ground
         float sunElevationWeight = std::clamp((0.48f - sunHeight) / 0.28f, 0.0f, 1.0f) * std::clamp((sunHeight + 0.06f) / 0.16f, 0.0f, 1.0f);
-        if (options.vibrantVisuals && !isUnderwater && sunDotForward > 0.15f && sunElevationWeight > 0.01f && sunIntensity > 0.01f) {
+        float pitchWeight = std::clamp((camForward.y + 0.15f) / 0.30f, 0.0f, 1.0f);
+        if (options.vibrantVisuals && !isUnderwater && sunDotForward > 0.45f && sunElevationWeight > 0.01f && pitchWeight > 0.01f && sunIntensity > 0.01f) {
             glm::vec4 sunClip = vp * glm::vec4(camPos + sunDir * 500.0f, 1.0f);
             if (sunClip.w > 0.1f) {
-                sunScreenU = (sunClip.x / sunClip.w) * 0.5f + 0.5f;
-                sunScreenV = 1.0f - ((sunClip.y / sunClip.w) * 0.5f + 0.5f);
-                float forwardFade = std::clamp((sunDotForward - 0.15f) / 0.35f, 0.0f, 1.0f);
-                godRaySunIntensity = sunIntensity * dayFactor * forwardFade * sunElevationWeight;
+                float u = (sunClip.x / sunClip.w) * 0.5f + 0.5f;
+                float v = 1.0f - ((sunClip.y / sunClip.w) * 0.5f + 0.5f);
+                if (u >= -0.15f && u <= 1.15f && v >= -0.15f && v <= 1.15f) {
+                    sunScreenU = u;
+                    sunScreenV = v;
+                    float forwardFade = std::clamp((sunDotForward - 0.45f) / 0.35f, 0.0f, 1.0f);
+                    godRaySunIntensity = sunIntensity * dayFactor * forwardFade * sunElevationWeight * pitchWeight;
+                }
             }
         }
 
-        // 1. Tonemap & Composite 3D Scene into Swapchain
-        postProcessRenderer.renderQuad(cmd, swapchain.getExtent(),
-                                       options.exposure, 1.0f, 0.05f, timer.getElapsedTime(),
-                                       options.vibrantVisuals, 0.0f, isUnderwater ? 1.0f : 0.0f,
-                                       sunScreenU, sunScreenV, godRaySunIntensity, sunHeight);
+        // 1. Tonemap 3D Scene to LDR at internal render resolution
+        postProcessRenderer.renderToLDR(cmd,
+                                        options.exposure, 1.0f, 0.05f, timer.getElapsedTime(),
+                                        (options.vibrantVisuals && options.shadersEnabled), 0.0f,
+                                        isUnderwater ? 1.0f : 0.0f,
+                                        sunScreenU, sunScreenV, godRaySunIntensity, sunHeight);
 
-        // 2. Crisp 2D UI & Menus Overlay on top
+        // =============================================================
+        // Pass 3: TSR Temporal Super Resolution / FSR 1.0 Spatial Upscale into Swapchain
+        // =============================================================
+        swapchain.transitionToColorAttachment(cmd, imageIndex);
+
+        glm::mat4 currInvViewProj = glm::inverse(unjitteredVp);
+
+        tsrRenderer.render(cmd,
+                           postProcessRenderer.getLDRImageView(),
+                           postProcessRenderer.getSceneDepthImageView(),
+                           swapchain.getImageView(imageIndex),
+                           { postProcessRenderer.getWidth(), postProcessRenderer.getHeight() },
+                           swapchain.getExtent(),
+                           currInvViewProj,
+                           prevViewProj,
+                           jitterOffset,
+                           options.upscalerMode,
+                           options.upscalerSharpness);
+
+        prevViewProj = unjitteredVp;
+
+        // =============================================================
+        // Pass 4: Crisp 2D UI & Menus Overlay on top at 100% Native Resolution
+        // =============================================================
+        VkRenderingAttachmentInfo uiColorAtt{};
+        uiColorAtt.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+        uiColorAtt.imageView = swapchain.getImageView(imageIndex);
+        uiColorAtt.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        uiColorAtt.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // Preserve upscaled 3D scene!
+        uiColorAtt.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+
+        VkRenderingInfo uiRenderInfo{};
+        uiRenderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+        uiRenderInfo.renderArea = {{ 0, 0 }, swapchain.getExtent()};
+        uiRenderInfo.layerCount = 1;
+        uiRenderInfo.colorAttachmentCount = 1;
+        uiRenderInfo.pColorAttachments = &uiColorAtt;
+        uiRenderInfo.pDepthAttachment = nullptr;
+
+        vkCmdBeginRendering(cmd, &uiRenderInfo);
+
         VkViewport uiViewport{};
         uiViewport.x = 0.0f;
         uiViewport.y = static_cast<float>(swapchain.getExtent().height);
@@ -1708,11 +2496,11 @@ void run() {
 
         if (state == GameState::Playing) {
             uiRenderer.render(cmd, uiPipeline, &invertPipeline, player, uiW, uiH, displayedFPS, options, world.get(),
-                              isChatOpen, chatInput, chatFeedback, chatFeedbackTimer);
+                              isChatOpen, chatInput, chatFeedback, chatFeedbackTimer, descSet, sleepFadeAlpha);
         }
 
         if (state != GameState::Playing) {
-            menuRenderer.render(cmd, uiPipeline, state, player, uiW, uiH, uiMousePos, options, loadingProgress, loadingLoadedChunks, loadingTotalChunks);
+            menuRenderer.render(cmd, uiPipeline, state, player, uiW, uiH, uiMousePos, options, loadingProgress, loadingLoadedChunks, loadingTotalChunks, descSet);
         }
 
         vkCmdEndRendering(cmd);
@@ -1722,7 +2510,8 @@ void run() {
 
         if (!commandQueue.endFrame(swapchain, imageIndex)) {
             swapchain.recreate(window.getWidth(), window.getHeight());
-            auto [targetRenderW, targetRenderH] = computeRenderResolution(options.resIndex, window.getWidth(), window.getHeight());
+            tsrRenderer.recreate(window.getWidth(), window.getHeight());
+            auto [targetRenderW, targetRenderH] = computeInternalResolution(options, window.getWidth(), window.getHeight());
             if (targetRenderW != postProcessRenderer.getWidth() || targetRenderH != postProcessRenderer.getHeight()) {
                 postProcessRenderer.recreate(targetRenderW, targetRenderH);
                 updateWaterDescriptorSets();
@@ -1738,6 +2527,10 @@ void run() {
                 std::this_thread::sleep_for(std::chrono::duration<float>(sleepSec));
             }
         }
+    }
+
+    if (world) {
+        world->saveAll(player, timeOfDay);
     }
 
     context.waitIdle();

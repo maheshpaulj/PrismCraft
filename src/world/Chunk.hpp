@@ -25,6 +25,14 @@ public:
     
     [[nodiscard]] bool isGenerated() const { return m_generated; }
     void setGenerated() { m_generated = true; }
+
+    [[nodiscard]] const Cell* getRawCells() const { return reinterpret_cast<const Cell*>(m_cells); }
+    Cell* getRawCells() { return reinterpret_cast<Cell*>(m_cells); }
+    void loadRawCells(const Cell* src) {
+        std::memcpy(m_cells, src, sizeof(m_cells));
+        m_dirty = false;
+        m_generated = true;
+    }
     
 private:
     ChunkCoord m_coord;

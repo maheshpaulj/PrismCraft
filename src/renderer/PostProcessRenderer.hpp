@@ -29,6 +29,9 @@ public:
     void transitionHDRForRendering(VkCommandBuffer cmd);
     void transitionHDRForSampling(VkCommandBuffer cmd);
     void transitionDepthForRendering(VkCommandBuffer cmd);
+    void transitionDepthForSampling(VkCommandBuffer cmd);
+    void transitionLDRForRendering(VkCommandBuffer cmd);
+    void transitionLDRForSampling(VkCommandBuffer cmd);
 
     void render(VkCommandBuffer cmd, VkImageView swapchainImageView, VkExtent2D extent,
                 float exposure, float vibrance, float bloomStrength, float time,
@@ -40,7 +43,16 @@ public:
                     float sunScreenU = 0.5f, float sunScreenV = 0.5f,
                     float sunIntensity = 0.0f, float sunHeight = 0.0f);
 
+    void renderToLDR(VkCommandBuffer cmd,
+                     float exposure, float vibrance, float bloomStrength, float time,
+                     bool vibrantVisuals, float sharpening = 0.0f, float isUnderwater = 0.0f,
+                     float sunScreenU = 0.5f, float sunScreenV = 0.5f,
+                     float sunIntensity = 0.0f, float sunHeight = 0.0f);
+
     void copyHDRToSSR(VkCommandBuffer cmd, VkImage sceneDepthImage = VK_NULL_HANDLE);
+
+    [[nodiscard]] VkImageView getLDRImageView() const { return m_ldrImageView; }
+    [[nodiscard]] VkImage getLDRImage() const { return m_ldrImage; }
 
     [[nodiscard]] VkImageView getHDRImageView() const { return m_hdrImageView; }
     [[nodiscard]] VkImage getHDRImage() const { return m_hdrImage; }
@@ -87,10 +99,15 @@ private:
     VkImageView m_ssrDepthImageView = VK_NULL_HANDLE;
     VkSampler m_ssrDepthSampler = VK_NULL_HANDLE;
 
+    VkImage m_ldrImage = VK_NULL_HANDLE;
+    VmaAllocation m_ldrAllocation = VK_NULL_HANDLE;
+    VkImageView m_ldrImageView = VK_NULL_HANDLE;
+
     VkImageLayout m_currentHDRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkImageLayout m_currentDepthLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkImageLayout m_currentSSRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     VkImageLayout m_currentSSRDepthLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VkImageLayout m_currentLDRLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkDescriptorSetLayout m_descLayout = VK_NULL_HANDLE;
     VkDescriptorPool m_descPool = VK_NULL_HANDLE;

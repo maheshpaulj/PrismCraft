@@ -25,7 +25,8 @@ struct PushConstants {
 enum class BlendMode {
     None = 0,
     Alpha = 1,
-    Invert = 2
+    Invert = 2,
+    Multiply = 3
 };
 
 class Pipeline {

@@ -26,6 +26,8 @@ public:
     
     [[nodiscard]] glm::mat4 getViewMatrix() const;
     [[nodiscard]] glm::mat4 getProjectionMatrix(float aspectRatio) const;
+    [[nodiscard]] glm::mat4 getJitteredProjectionMatrix(float aspectRatio, const glm::vec2& jitterOffset, const glm::vec2& renderResolution) const;
+    static glm::vec2 getHaltonJitter(int frameIndex, int sequenceLength = 16);
     [[nodiscard]] Frustum getFrustum(float aspectRatio) const;
     [[nodiscard]] glm::vec3 getPosition() const { return m_position; }
     [[nodiscard]] glm::vec3 getRenderPosition() const;
@@ -33,6 +35,9 @@ public:
     [[nodiscard]] glm::vec3 getRight() const { return m_right; }
     [[nodiscard]] glm::vec3 getUp() const { return m_up; }
     [[nodiscard]] float getYaw() const { return m_yaw; }
+    [[nodiscard]] float getPitch() const { return m_pitch; }
+    void setPitch(float pitch);
+    void setYaw(float yaw);
     
     void setPosition(const glm::vec3& pos) { m_position = pos; }
     

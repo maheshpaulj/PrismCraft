@@ -136,14 +136,15 @@ public:
                          const std::string& text,
                          float x, float y, float size,
                          const glm::vec3& color = glm::vec3(1.0f),
-                         bool withShadow = true) {
+                         bool withShadow = true,
+                         float alpha = 1.0f) {
         float charW = size * 0.85f;
         float charH = size;
         float curX = x;
 
         auto addGlyphQuad = [&](float gx, float gy, glm::vec4 uv, glm::vec3 col) {
             uint32_t b = static_cast<uint32_t>(vertices.size());
-            glm::vec3 norm(0.0f, 0.0f, 1.0f);
+            glm::vec3 norm(0.0f, 0.0f, alpha);
             vertices.push_back({glm::vec3(gx, gy + charH, 0.0f), glm::vec2(uv.x, uv.w), norm, col});
             vertices.push_back({glm::vec3(gx + charW, gy + charH, 0.0f), glm::vec2(uv.z, uv.w), norm, col});
             vertices.push_back({glm::vec3(gx + charW, gy, 0.0f), glm::vec2(uv.z, uv.y), norm, col});

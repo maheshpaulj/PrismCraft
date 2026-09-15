@@ -36,12 +36,13 @@ for %%F in ("!SRC_SHADERS!\*.vert" "!SRC_SHADERS!\*.frag" "!SRC_SHADERS!\*.comp"
     )
 )
 
-echo Syncing textures, sounds, and music...
+echo Syncing textures, sounds, music, and block definitions...
 for %%D in ("%PROJ_DIR%x64\Release" "%PROJ_DIR%x64\Debug") do (
     if not exist "%%~D\assets\textures" mkdir "%%~D\assets\textures"
     if not exist "%%~D\assets\sounds" mkdir "%%~D\assets\sounds"
     if not exist "%%~D\assets\music" mkdir "%%~D\assets\music"
-    copy /Y "%PROJ_DIR%assets\textures\*" "%%~D\assets\textures\" >nul 2>nul
+    copy /Y "%PROJ_DIR%assets\blocks.json" "%%~D\assets\blocks.json" >nul 2>nul
+    xcopy /E /I /Y "%PROJ_DIR%assets\textures" "%%~D\assets\textures" >nul 2>nul
     copy /Y "%PROJ_DIR%assets\sounds\*" "%%~D\assets\sounds\" >nul 2>nul
     copy /Y "%PROJ_DIR%assets\music\*" "%%~D\assets\music\" >nul 2>nul
 )

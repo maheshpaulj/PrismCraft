@@ -4,7 +4,9 @@
 #include "player/Player.hpp"
 #include "world/ChunkMesher.hpp"
 #include "TextureAtlas.hpp"
+#include "core/Input.hpp"
 #include <glm/gtc/matrix_transform.hpp>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -76,15 +78,52 @@ void HandRenderer::buildLocalHeldBlockMesh(BlockType type) {
     };
 
     auto addTri = [&](const glm::vec3& v0, const glm::vec3& v1, const glm::vec3& v2,
-                      const glm::vec4& uv, const glm::vec3& norm) {
+                      const glm::vec2& uv0, const glm::vec2& uv1, const glm::vec2& uv2,
+                      const glm::vec3& norm) {
         uint32_t b = static_cast<uint32_t>(m_localItemVertices.size());
-        m_localItemVertices.push_back({v0, glm::vec2(uv.x, uv.y), norm, glm::vec3(1.0f)});
-        m_localItemVertices.push_back({v1, glm::vec2(uv.x, uv.w), norm, glm::vec3(1.0f)});
-        m_localItemVertices.push_back({v2, glm::vec2(uv.z, uv.y), norm, glm::vec3(1.0f)});
+        m_localItemVertices.push_back({v0, uv0, norm, glm::vec3(1.0f)});
+        m_localItemVertices.push_back({v1, uv1, norm, glm::vec3(1.0f)});
+        m_localItemVertices.push_back({v2, uv2, norm, glm::vec3(1.0f)});
         m_localItemIndices.push_back(b + 0); m_localItemIndices.push_back(b + 1); m_localItemIndices.push_back(b + 2);
     };
 
-    if (Cell{type}.isItem()) {
+    if (Cell{type}.isTorch()) {
+        // Dedicated 3D Torch model held in hand
+        float hw = 0.024f;
+        float hHandle = 0.26f;
+        float hTotal = 0.38f;
+
+        glm::vec4 uvTorch = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(type, 0));
+        float uSpan = (uvTorch.z - uvTorch.x);
+        float vSpan = (uvTorch.w - uvTorch.y);
+
+        glm::vec4 uvStick(uvTorch.x + uSpan * (7.0f / 16.0f),
+                          uvTorch.y + vSpan * (6.0f / 16.0f),
+                          uvTorch.x + uSpan * (9.0f / 16.0f),
+                          uvTorch.w);
+        glm::vec4 uvFlame(uvTorch.x + uSpan * (6.0f / 16.0f),
+                          uvTorch.y,
+                          uvTorch.x + uSpan * (10.0f / 16.0f),
+                          uvTorch.y + vSpan * (6.0f / 16.0f));
+
+        // Wooden handle
+        addQuad({-hw, 0.0f, -hw}, { hw, 0.0f, -hw}, { hw, 0.0f,  hw}, {-hw, 0.0f,  hw}, uvStick, glm::vec3(0, -1, 0));
+        addQuad({-hw, 0.0f,  hw}, { hw, 0.0f,  hw}, { hw, hHandle,  hw}, {-hw, hHandle,  hw}, uvStick, glm::vec3(0, 0, 1));
+        addQuad({ hw, 0.0f, -hw}, {-hw, 0.0f, -hw}, {-hw, hHandle, -hw}, { hw, hHandle, -hw}, uvStick, glm::vec3(0, 0, -1));
+        addQuad({ hw, 0.0f,  hw}, { hw, 0.0f, -hw}, { hw, hHandle, -hw}, { hw, hHandle,  hw}, uvStick, glm::vec3(1, 0, 0));
+        addQuad({-hw, 0.0f, -hw}, {-hw, 0.0f,  hw}, {-hw, hHandle,  hw}, {-hw, hHandle, -hw}, uvStick, glm::vec3(-1, 0, 0));
+
+        // Glowing flame head
+        float fhw = hw * 1.25f;
+        addQuad({-fhw, hHandle,  fhw}, { fhw, hHandle,  fhw}, { fhw, hTotal,  fhw}, {-fhw, hTotal,  fhw}, uvFlame, glm::vec3(0, 0, 1));
+        addQuad({ fhw, hHandle, -fhw}, {-fhw, hHandle, -fhw}, {-fhw, hTotal, -fhw}, { fhw, hTotal, -fhw}, uvFlame, glm::vec3(0, 0, -1));
+        addQuad({ fhw, hHandle,  fhw}, { fhw, hHandle, -fhw}, { fhw, hTotal, -fhw}, { fhw, hTotal,  fhw}, uvFlame, glm::vec3(1, 0, 0));
+        addQuad({-fhw, hHandle, -fhw}, {-fhw, hHandle,  fhw}, {-fhw, hTotal,  fhw}, {-fhw, hTotal, -fhw}, uvFlame, glm::vec3(-1, 0, 0));
+        addQuad({-fhw, hTotal,  -fhw}, {-fhw, hTotal,   fhw}, { fhw, hTotal,   fhw}, { fhw, hTotal,  -fhw}, uvFlame, glm::vec3(0, 1, 0));
+        return;
+    }
+
+    if (Cell{type}.isFlatItem()) {
         uint32_t tileId = TextureAtlas::getTileForBlock(type, 0);
 
         bool occupied[16][16];
@@ -95,7 +134,7 @@ void HandRenderer::buildLocalHeldBlockMesh(BlockType type) {
             }
         }
 
-        float totalSize = 0.36f; // Standard 3D tool dimensions
+        float totalSize = 0.38f; // Standard 3D tool dimensions
         float voxelSize = totalSize / 16.0f;
         float voxelThick = 0.024f; // 3D extrusion thickness
         float zMin = -voxelThick * 0.5f;
@@ -104,14 +143,19 @@ void HandRenderer::buildLocalHeldBlockMesh(BlockType type) {
         int col = tileId % TextureAtlas::TILES_PER_ROW;
         int row = tileId / TextureAtlas::TILES_PER_ROW;
 
+        // For tools, pivot at the wooden handle base (px=3, py=13) so Steve grips the handle.
+        // For standard items (ingots, apples, diamonds), pivot in the center (8, 8).
+        bool isTool = Cell{type}.isTool();
+        float pivotX = isTool ? 3.5f : 8.0f;
+        float pivotY = isTool ? 12.5f : 8.0f;
+
         for (int py = 0; py < 16; ++py) {
             for (int px = 0; px < 16; ++px) {
                 if (!occupied[py][px]) continue;
 
-                // Center coordinates so sprite center is at (0, 0)
-                float x0 = (static_cast<float>(px) - 8.0f) * voxelSize;
+                float x0 = (static_cast<float>(px) - pivotX) * voxelSize;
                 float x1 = x0 + voxelSize;
-                float y1 = (8.0f - static_cast<float>(py)) * voxelSize;
+                float y1 = (pivotY - static_cast<float>(py)) * voxelSize;
                 float y0 = y1 - voxelSize;
 
                 int atlasX = col * TextureAtlas::TILE_SIZE + px;
@@ -161,8 +205,14 @@ void HandRenderer::buildLocalHeldBlockMesh(BlockType type) {
     glm::vec4 uvSide = TextureAtlas::getTileUV(TextureAtlas::getTileForBlock(type, 2));
 
     // Miniature triangular prism
-    addTri({-s,  s, -s}, {-s,  s,  s}, { s,  s, -s}, uvTop, glm::vec3(0, 1, 0));
-    addTri({-s, -s, -s}, { s, -s, -s}, {-s, -s,  s}, uvBot, glm::vec3(0, -1, 0));
+    // Top face (CCW: v0 -> v1 -> v2)
+    addTri({-s,  s, -s}, {-s,  s,  s}, { s,  s, -s},
+           glm::vec2(uvTop.x, uvTop.y), glm::vec2(uvTop.x, uvTop.w), glm::vec2(uvTop.z, uvTop.y),
+           glm::vec3(0, 1, 0));
+    // Bottom face (CCW: v0 -> v1 -> v2)
+    addTri({-s, -s, -s}, { s, -s, -s}, {-s, -s,  s},
+           glm::vec2(uvBot.x, uvBot.y), glm::vec2(uvBot.z, uvBot.y), glm::vec2(uvBot.x, uvBot.w),
+           glm::vec3(0, -1, 0));
     addQuad({ s, -s, -s}, {-s, -s, -s}, {-s,  s, -s}, { s,  s, -s}, uvSide, glm::vec3(0, 0, -1));
     addQuad({-s, -s, -s}, {-s, -s,  s}, {-s,  s,  s}, {-s,  s, -s}, uvSide, glm::vec3(-1, 0, 0));
     addQuad({-s, -s,  s}, { s, -s, -s}, { s,  s, -s}, {-s,  s,  s}, uvSide, glm::normalize(glm::vec3(1, 0, 1)));
@@ -190,6 +240,13 @@ void HandRenderer::render(VkCommandBuffer cmd,
     float swayX = std::sin(bobTime) * 0.035f * bobWeight;
     float swayY = -std::abs(std::cos(bobTime)) * 0.035f * bobWeight;
 
+    // Fluid mouse-look inertia sway
+    glm::vec2 mouseDelta = Input::getMouseDelta();
+    float mouseSwayX = std::clamp(-mouseDelta.x * 0.0003f, -0.035f, 0.035f);
+    float mouseSwayY = std::clamp(-mouseDelta.y * 0.0003f, -0.035f, 0.035f);
+    swayX += mouseSwayX;
+    swayY += mouseSwayY;
+
     // Swing punch animation
     float swingProgress = player.getSwingProgress();
     float swing = 0.0f;
@@ -210,21 +267,30 @@ void HandRenderer::render(VkCommandBuffer cmd,
     bool isAxe = Cell{currentBlock}.isAxe();
     bool isShovel = Cell{currentBlock}.isShovel();
     bool isBow = Cell{currentBlock}.isBow();
-    bool isBlocking = player.isBlocking() && isSword;
+    bool isBlocking = player.isBlocking();
+    bool isTorch = Cell{currentBlock}.isTorch();
+    // Smooth vertical jump inertia (replaces walking bobbing while airborne)
+    float jumpInertiaY = 0.0f;
+    float jumpPitch = 0.0f;
+    if (!player.isOnGround() && !player.isFlying() && !player.isInWater()) {
+        float vy = player.getVelocity().y;
+        jumpInertiaY = std::clamp(vy * -0.005f, -0.035f, 0.025f);
+        jumpPitch = std::clamp(vy * -0.7f, -6.0f, 4.5f);
+    }
 
     glm::vec3 handPos(0.35f + swayX - swing * 0.08f, 
-                      -0.27f + swayY + swing * 0.05f - place * 0.06f, 
+                      -0.27f + swayY + jumpInertiaY + swing * 0.05f - place * 0.06f, 
                       -0.52f - swing * 0.12f + place * 0.05f);
 
     glm::mat4 handModel = glm::mat4(1.0f);
     if (isBlocking) {
-        handModel = glm::translate(handModel, glm::vec3(0.12f + swayX * 0.2f, -0.20f + swayY * 0.2f, -0.42f));
-        handModel = glm::rotate(handModel, glm::radians(-35.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        handModel = glm::translate(handModel, glm::vec3(0.12f + swayX * 0.2f, -0.20f + swayY * 0.2f + jumpInertiaY * 0.5f, -0.42f));
+        handModel = glm::rotate(handModel, glm::radians(-35.0f + jumpPitch * 0.5f), glm::vec3(1.0f, 0.0f, 0.0f));
         handModel = glm::rotate(handModel, glm::radians(30.0f), glm::vec3(0.0f, 1.0f, 0.0f));
         handModel = glm::rotate(handModel, glm::radians(-45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
     } else {
         handModel = glm::translate(handModel, handPos);
-        handModel = glm::rotate(handModel, glm::radians(-15.0f + swing * 40.0f - place * 15.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        handModel = glm::rotate(handModel, glm::radians(-15.0f + jumpPitch + swing * 40.0f - place * 15.0f), glm::vec3(1.0f, 0.0f, 0.0f));
         handModel = glm::rotate(handModel, glm::radians(25.0f - swing * 30.0f), glm::vec3(0.0f, 1.0f, 0.0f));
         handModel = glm::rotate(handModel, glm::radians(-10.0f), glm::vec3(0.0f, 0.0f, 1.0f));
     }
@@ -248,27 +314,32 @@ void HandRenderer::render(VkCommandBuffer cmd,
             itemModel = glm::rotate(itemModel, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
             itemModel = glm::rotate(itemModel, glm::radians(-20.0f + swing * 40.0f), glm::vec3(1.0f, 0.0f, 0.0f));
         }
+    } else if (isTorch) {
+        itemModel = glm::translate(itemModel, glm::vec3(0.02f, 0.03f, -0.26f));
+        itemModel = glm::rotate(itemModel, glm::radians(10.0f - swing * 25.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        itemModel = glm::rotate(itemModel, glm::radians(15.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        itemModel = glm::rotate(itemModel, glm::radians(-10.0f), glm::vec3(0.0f, 0.0f, 1.0f));
     } else if (isSword) {
-        itemModel = glm::translate(itemModel, glm::vec3(0.0f, 0.08f, -0.30f));
-        itemModel = glm::rotate(itemModel, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        itemModel = glm::rotate(itemModel, glm::radians(-25.0f + swing * 75.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-        itemModel = glm::rotate(itemModel, glm::radians(25.0f - swing * 50.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-        itemModel = glm::rotate(itemModel, glm::radians(swing * 30.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        itemModel = glm::translate(itemModel, glm::vec3(0.02f, 0.04f, -0.25f));
+        itemModel = glm::rotate(itemModel, glm::radians(42.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        itemModel = glm::rotate(itemModel, glm::radians(-22.0f + swing * 75.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        itemModel = glm::rotate(itemModel, glm::radians(22.0f - swing * 45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        itemModel = glm::rotate(itemModel, glm::radians(swing * 35.0f), glm::vec3(0.0f, 0.0f, 1.0f));
     } else if (isPickaxe) {
-        itemModel = glm::translate(itemModel, glm::vec3(0.0f, 0.08f + swing * 0.04f, -0.30f - swing * 0.08f));
-        itemModel = glm::rotate(itemModel, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        itemModel = glm::rotate(itemModel, glm::radians(-35.0f + swing * 85.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        itemModel = glm::translate(itemModel, glm::vec3(0.02f, 0.04f + swing * 0.04f, -0.25f - swing * 0.08f));
+        itemModel = glm::rotate(itemModel, glm::radians(42.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        itemModel = glm::rotate(itemModel, glm::radians(-32.0f + swing * 85.0f), glm::vec3(1.0f, 0.0f, 0.0f));
         itemModel = glm::rotate(itemModel, glm::radians(15.0f - swing * 15.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     } else if (isAxe) {
-        itemModel = glm::translate(itemModel, glm::vec3(-swing * 0.03f, 0.07f + swing * 0.03f, -0.30f - swing * 0.06f));
-        itemModel = glm::rotate(itemModel, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-        itemModel = glm::rotate(itemModel, glm::radians(-30.0f + swing * 70.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-        itemModel = glm::rotate(itemModel, glm::radians(20.0f - swing * 20.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        itemModel = glm::translate(itemModel, glm::vec3(0.02f - swing * 0.03f, 0.04f + swing * 0.03f, -0.25f - swing * 0.06f));
+        itemModel = glm::rotate(itemModel, glm::radians(42.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        itemModel = glm::rotate(itemModel, glm::radians(-28.0f + swing * 75.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+        itemModel = glm::rotate(itemModel, glm::radians(18.0f - swing * 20.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     } else if (isShovel) {
-        itemModel = glm::translate(itemModel, glm::vec3(0.0f, 0.06f - swing * 0.05f, -0.28f - swing * 0.10f));
-        itemModel = glm::rotate(itemModel, glm::radians(40.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+        itemModel = glm::translate(itemModel, glm::vec3(0.02f, 0.03f - swing * 0.05f, -0.24f - swing * 0.10f));
+        itemModel = glm::rotate(itemModel, glm::radians(38.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         itemModel = glm::rotate(itemModel, glm::radians(-15.0f + swing * 45.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-        itemModel = glm::rotate(itemModel, glm::radians(25.0f - swing * 15.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        itemModel = glm::rotate(itemModel, glm::radians(22.0f - swing * 15.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     } else if (isItem) {
         itemModel = glm::translate(itemModel, glm::vec3(0.0f, 0.07f, -0.28f));
         itemModel = glm::rotate(itemModel, glm::radians(45.0f), glm::vec3(0.0f, 0.0f, 1.0f));
@@ -293,6 +364,9 @@ void HandRenderer::render(VkCommandBuffer cmd,
     indices.reserve(m_localHandIndices.size() + m_localItemIndices.size());
 
     // Shading parameter: skylight exposure (r), ambient occlusion (g), block torch level (b)
+    if (isTorch) {
+        torchlight = std::max(torchlight, 14.0f); // Holding a torch illuminates the player's arm
+    }
     glm::vec3 vertColor(skylight, 1.0f, torchlight);
 
     // 1. Transform Hand Vertices
@@ -308,11 +382,12 @@ void HandRenderer::render(VkCommandBuffer cmd,
 
     // 2. Transform Held Block or 3D Tool Vertices
     if (!m_localItemVertices.empty()) {
+        glm::vec3 itemCol = isTorch ? glm::vec3(1.0f, 1.0f, 1.0f) : vertColor;
         uint32_t itemBase = static_cast<uint32_t>(vertices.size());
         for (const auto& v : m_localItemVertices) {
             glm::vec3 wPos  = glm::vec3(worldItem * glm::vec4(v.position, 1.0f));
             glm::vec3 wNorm = glm::normalize(normItem * v.normal);
-            vertices.push_back({wPos, v.texCoord, wNorm, vertColor});
+            vertices.push_back({wPos, v.texCoord, wNorm, itemCol});
         }
         for (uint32_t idx : m_localItemIndices) {
             indices.push_back(itemBase + idx);

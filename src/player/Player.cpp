@@ -72,10 +72,11 @@ void Player::setPosition(const glm::vec3& pos) {
 }
 
 void Player::respawn(const glm::vec3& groundPos) {
-    m_position = groundPos;
+    m_position = m_hasSpawnPoint ? m_spawnPoint : groundPos;
     m_velocity = glm::vec3(0.0f);
     m_lastFallVelY = 0.0f;
     m_health = 20.0f;
+    m_hunger = 20.0f;
     m_oxygen = 10.0f;
     m_drownTimer = 0.0f;
     m_onGround = true;
@@ -85,6 +86,16 @@ void Player::respawn(const glm::vec3& groundPos) {
 void Player::toggleFlying() {
     m_flying = !m_flying;
     m_velocity = glm::vec3(0.0f);
+}
+
+void Player::setCreative(bool c) {
+    m_creative = c;
+    if (m_creative) {
+        m_health = 20.0f;
+        m_hunger = 20.0f;
+        m_oxygen = 10.0f;
+        m_flying = true;
+    }
 }
 
 void Player::triggerSwing() {
@@ -100,7 +111,7 @@ void Player::triggerPlace() {
 }
 
 void Player::takeDamage(float dmg) {
-    if (m_flying) return;
+    if (m_flying || m_creative) return;
     m_health = std::max(0.0f, m_health - dmg);
     AudioEngine::get().playSound(SoundEffect::PlayerHurt, 0.9f);
 }
@@ -175,6 +186,7 @@ bool Player::pickupItem(BlockType type, int count) {
 }
 
 void Player::consumeSelectedItem() {
+    if (m_creative) return;
     if (m_selectedSlot >= 0 && m_selectedSlot < 10) {
         if (m_hotbarCounts[m_selectedSlot] > 0) {
             m_hotbarCounts[m_selectedSlot]--;
@@ -187,6 +199,7 @@ void Player::consumeSelectedItem() {
 }
 
 bool Player::hasItem(BlockType type, int count) const {
+    if (m_creative) return true;
     if (type == BlockType::Air || count <= 0) return true;
     int total = 0;
     for (int i = 0; i < 10; ++i) {
@@ -205,6 +218,7 @@ bool Player::hasItem(BlockType type, int count) const {
 }
 
 bool Player::consumeItem(BlockType type, int count) {
+    if (m_creative) return true;
     if (!hasItem(type, count)) return false;
     int remaining = count;
 
@@ -454,11 +468,7 @@ void Player::handleInput(float dt) {
 }
 
 void Player::update(float dt, const World& world) {
-    if (m_flying) {
-        m_position += m_velocity * dt;
-    } else {
-        moveAndCollide(m_velocity * dt, world);
-    }
+    moveAndCollide(m_velocity * dt, world);
 
     // Smooth crouch eye-height transition
     float targetEyeHeight = m_crouching ? 1.38f : 1.62f;
@@ -484,21 +494,35 @@ void Player::update(float dt, const World& world) {
         }
     }
 
-    // Footsteps & Bobbing
+    // Footsteps & Bobbing (strictly on ground, zero bobbing when jumping or flying)
     float horizSpeed = glm::length(glm::vec2(m_velocity.x, m_velocity.z));
-    if (m_onGround && horizSpeed > 0.5f) {
+
+    if (m_onGround && horizSpeed > 0.5f && !m_flying && !m_inWater) {
         m_bobTime += dt * horizSpeed * 1.8f;
-        m_bobWeight = std::min(1.0f, m_bobWeight + dt * 5.0f);
+        m_bobWeight = std::min(1.0f, m_bobWeight + dt * 6.0f);
 
         m_footstepTimer += dt * horizSpeed;
         if (m_footstepTimer > 2.2f) {
-            CellCoord groundCell = worldToCell(m_position - glm::vec3(0.0f, 0.2f, 0.0f));
+            CellCoord groundCell = worldToCell(m_position - glm::vec3(0.0f, 0.3f, 0.0f));
             Cell gBlock = world.getCell(groundCell.x, groundCell.y, groundCell.z, groundCell.s);
-            AudioEngine::get().playBlockStep(static_cast<int>(gBlock.type), 0.6f);
+            if (gBlock.type == BlockType::Air) {
+                groundCell = worldToCell(m_position - glm::vec3(0.0f, 1.0f, 0.0f));
+                gBlock = world.getCell(groundCell.x, groundCell.y, groundCell.z, groundCell.s);
+            }
+            if (gBlock.type != BlockType::Air) {
+                AudioEngine::get().playBlockStep(static_cast<int>(gBlock.type), 0.6f);
+            } else {
+                AudioEngine::get().playSound(SoundEffect::GrassStep, 0.6f);
+            }
             m_footstepTimer = 0.0f;
         }
     } else {
-        m_bobWeight = std::max(0.0f, m_bobWeight - dt * 5.0f);
+        m_bobWeight = std::max(0.0f, m_bobWeight - dt * 8.0f);
+        m_footstepTimer = 0.0f;
+    }
+
+    if (m_flying || !m_onGround) {
+        m_bobWeight = 0.0f;
         m_footstepTimer = 0.0f;
     }
 
@@ -521,7 +545,10 @@ void Player::update(float dt, const World& world) {
     m_underwater = (headBlock.type == BlockType::Water);
     m_inWater = (feetBlock.type == BlockType::Water || waistBlock.type == BlockType::Water || m_underwater);
 
-    if (m_underwater) {
+    if (m_creative) {
+        m_oxygen = 10.0f;
+        m_drownTimer = 0.0f;
+    } else if (m_underwater) {
         m_oxygen = std::max(0.0f, m_oxygen - dt * 0.65f);
         if (m_oxygen <= 0.0f) {
             m_drownTimer += dt;
@@ -545,12 +572,17 @@ void Player::clearInventory() {
 
 void Player::resetToStarterInventory() {
     clearInventory();
+    clearSpawnPoint();
     m_hotbar[0] = BlockType::Wood;
     m_hotbarCounts[0] = 32;
     m_hotbar[1] = BlockType::Torch;
     m_hotbarCounts[1] = 8;
     m_hotbar[2] = BlockType::Glass;
     m_hotbarCounts[2] = 64;
+    m_hotbar[3] = BlockType::DoorWood;
+    m_hotbarCounts[3] = 4;
+    m_hotbar[4] = BlockType::Bed;
+    m_hotbarCounts[4] = 2;
     m_selectedSlot = 0;
 }
 

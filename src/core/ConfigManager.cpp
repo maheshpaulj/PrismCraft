@@ -45,8 +45,12 @@ bool ConfigManager::load(GameOptions& options, const std::string& filePath) {
             else if (key == "resIndex") options.resIndex = std::clamp(std::stoi(val), 0, 4);
             else if (key == "maxFps") options.maxFps = std::stoi(val);
             else if (key == "vsync") options.vsync = (val == "1" || val == "true" || val == "True");
-            else if (key == "renderDistance") options.renderDistance = std::clamp(std::stoi(val), 4, 24);
+            else if (key == "renderDistance") options.renderDistance = std::clamp(std::stoi(val), 4, 48);
+            else if (key == "lodDistance") options.lodDistance = std::clamp(std::stoi(val), 16, 256);
             else if (key == "lodPreset") options.lodPreset = std::clamp(std::stoi(val), 0, 3);
+            else if (key == "showFPS") options.showFPS = (val == "1" || val == "true" || val == "True");
+            else if (key == "showXYZ") options.showXYZ = (val == "1" || val == "true" || val == "True");
+            else if (key == "shadersEnabled") options.shadersEnabled = (val == "1" || val == "true" || val == "True");
             else if (key == "fogFalloff") options.fogFalloff = std::clamp(std::stof(val), 0.5f, 1.2f);
             else if (key == "clouds") options.clouds = (val == "1" || val == "true" || val == "True");
             else if (key == "cloudShadows") options.cloudShadows = (val == "1" || val == "true" || val == "True");
@@ -67,6 +71,10 @@ bool ConfigManager::load(GameOptions& options, const std::string& filePath) {
             else if (key == "fogHeight") options.fogHeight = std::clamp(std::stof(val), 20.0f, 160.0f);
             else if (key == "fogStartDist") options.fogStartDist = std::clamp(std::stof(val), 0.0f, 100.0f);
             else if (key == "scatteringStrength") options.scatteringStrength = std::clamp(std::stof(val), 0.0f, 4.0f);
+            else if (key == "upscalerMode") options.upscalerMode = std::clamp(std::stoi(val), 0, 2);
+            else if (key == "upscalerQuality") options.upscalerQuality = std::clamp(std::stoi(val), 0, 3);
+            else if (key == "upscalerSharpness") options.upscalerSharpness = std::clamp(std::stof(val), 0.0f, 1.0f);
+            else if (key == "ramCacheSize") options.ramCacheSize = std::clamp(std::stoi(val), 0, 3);
         } catch (...) {
             // Ignore malformed line
         }
@@ -99,7 +107,11 @@ bool ConfigManager::save(const GameOptions& options, const std::string& filePath
     file << "maxFps=" << options.maxFps << "\n";
     file << "vsync=" << (options.vsync ? 1 : 0) << "\n";
     file << "renderDistance=" << options.renderDistance << "\n";
+    file << "lodDistance=" << options.lodDistance << "\n";
     file << "lodPreset=" << options.lodPreset << "\n";
+    file << "showFPS=" << (options.showFPS ? 1 : 0) << "\n";
+    file << "showXYZ=" << (options.showXYZ ? 1 : 0) << "\n";
+    file << "shadersEnabled=" << (options.shadersEnabled ? 1 : 0) << "\n";
     file << "fogFalloff=" << options.fogFalloff << "\n";
     file << "clouds=" << (options.clouds ? 1 : 0) << "\n";
     file << "cloudShadows=" << (options.cloudShadows ? 1 : 0) << "\n";
@@ -120,6 +132,10 @@ bool ConfigManager::save(const GameOptions& options, const std::string& filePath
     file << "fogHeight=" << options.fogHeight << "\n";
     file << "fogStartDist=" << options.fogStartDist << "\n";
     file << "scatteringStrength=" << options.scatteringStrength << "\n";
+    file << "upscalerMode=" << options.upscalerMode << "\n";
+    file << "upscalerQuality=" << options.upscalerQuality << "\n";
+    file << "upscalerSharpness=" << options.upscalerSharpness << "\n";
+    file << "ramCacheSize=" << options.ramCacheSize << "\n";
 
     std::cout << "[Config] Saved options to " << filePath << std::endl;
     return true;
