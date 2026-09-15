@@ -6,7 +6,7 @@
 ; =====================================================================
 
 #define MyAppName "PrismCraft"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "0.1.0"
 #define MyAppPublisher "PrismCraft Team"
 #define MyAppExeName "PrismCraft.exe"
 #define MyAppSourceDir "..\dist\PrismCraft"

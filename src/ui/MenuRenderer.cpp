@@ -1544,7 +1544,7 @@ void MenuRenderer::rebuildMenuMesh(GameState state, const Player& player, uint32
         addPrismButton(p4_0, p4_1, p4_2, "QUIT GAME", h4, false, 16.0f);
 
         // Footer copyright & version
-        FontRenderer::drawText(vertices, indices, "PrismCraft v1.0 [Vulkan 1.3]", 12.0f, sh - 22.0f, 12.0f, glm::vec3(0.70f, 0.70f, 0.70f), true);
+        FontRenderer::drawText(vertices, indices, "PrismCraft v0.1.0 [Vulkan 1.3]", 12.0f, sh - 22.0f, 12.0f, glm::vec3(0.70f, 0.70f, 0.70f), true);
         std::string rightTag = "Pure Voxel Triangular Honeycomb Engine";
         float tagW = FontRenderer::getTextWidth(rightTag, 12.0f);
         FontRenderer::drawText(vertices, indices, rightTag, sw - tagW - 12.0f, sh - 22.0f, 12.0f, glm::vec3(0.55f, 0.55f, 0.55f), true);

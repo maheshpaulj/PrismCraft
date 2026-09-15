@@ -142,7 +142,7 @@ void UIRenderer::updateDynamicUI(uint32_t f,
 
         // Line 1: Build & FPS
         char l1[128];
-        std::snprintf(l1, sizeof(l1), "PrismCraft Release x64 (%d FPS)", static_cast<int>(fps));
+        std::snprintf(l1, sizeof(l1), "PrismCraft v0.1.0 (%d FPS)", static_cast<int>(fps));
         FontRenderer::drawText(vertices, indices, l1, hudX, hudY, fontSize, glm::vec3(1.0f, 0.95f, 0.35f), true);
 
         // Line 2: XYZ Coordinates
