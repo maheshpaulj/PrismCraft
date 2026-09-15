@@ -486,12 +486,16 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                         };
 
                         // 1. Bottom Cap (-torchAxis)
-                        addTorchQuad(getP(-hw, 0.0f, -hw), getP(-hw, 0.0f,  hw), getP( hw, 0.0f,  hw), getP( hw, 0.0f, -hw),
+                        addTorchQuad(getP(-hw, 0.0f,  hw), getP(-hw, 0.0f, -hw), getP( hw, 0.0f, -hw), getP( hw, 0.0f,  hw),
                                      uvBot, -torchAxis, flameCol);
+                        addTorchQuad(getP(-hw, 0.0f, -hw), getP(-hw, 0.0f,  hw), getP( hw, 0.0f,  hw), getP( hw, 0.0f, -hw),
+                                     uvBot, torchAxis, flameCol);
 
                         // 2. Top Cap (+torchAxis)
-                        addTorchQuad(getP(-hw, hTotal,  hw), getP(-hw, hTotal, -hw), getP( hw, hTotal, -hw), getP( hw, hTotal,  hw),
+                        addTorchQuad(getP(-hw, hTotal, -hw), getP(-hw, hTotal,  hw), getP( hw, hTotal,  hw), getP( hw, hTotal, -hw),
                                      uvTop, torchAxis, flameCol);
+                        addTorchQuad(getP(-hw, hTotal,  hw), getP(-hw, hTotal, -hw), getP( hw, hTotal, -hw), getP( hw, hTotal,  hw),
+                                     uvTop, -torchAxis, flameCol);
 
                         // 3. Front Face (+frontDir)
                         addTorchQuad(getP( hw, 0.0f,  hw), getP( hw, hTotal,  hw), getP(-hw, hTotal,  hw), getP(-hw, 0.0f,  hw),
@@ -1017,24 +1021,25 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                         glm::vec3 colSide0(sS0, 1.0f, tS0);
                         addOpaqueQuad(B_seam0, T_seam0, T_end0, B_end0, uvSide, nSide0, colSide0, colSide0, colSide0, colSide0);
 
-                        // 5. Sturdy 3D Corner Legs (3x3 pixels / 0.1875m wide orthogonal square cuboid posts flush with outer edges)
+                        // 5. Sturdy 3D Corner Legs (Parallel to bed end board and slanted side skirts)
                         float legW = 0.1875f;
                         float legD = 0.1875f;
                         glm::vec3 colLeg = colBot * 0.90f;
 
-                        // Unit vector along the outer end board (from P_end0 towards P_end1)
-                        glm::vec2 uEnd = glm::normalize(P_end1 - P_end0);
-                        // Unit vector pointing inward into the bed, perpendicular to uEnd
-                        glm::vec2 uIn(-uEnd.y, uEnd.x);
-                        if (glm::dot(uIn, P_center - P_end0) < 0.0f) {
-                            uIn = -uIn;
-                        }
+                        // Unit vectors aligning with the bed's natural perimeter:
+                        // Corner 0: endboard points towards P_end1, side skirt points towards P_seam0
+                        glm::vec2 uEnd0 = glm::normalize(P_end1 - P_end0);
+                        glm::vec2 uSide0 = glm::normalize(P_seam0 - P_end0);
 
-                        auto buildAndAddLeg = [&](const glm::vec2& corner, const glm::vec2& dEnd, const glm::vec2& dLen) {
+                        // Corner 1: endboard points towards P_end0, side skirt points towards P_seam1
+                        glm::vec2 uEnd1 = -uEnd0;
+                        glm::vec2 uSide1 = glm::normalize(P_seam1 - P_end1);
+
+                        auto buildAndAddLeg = [&](const glm::vec2& corner, const glm::vec2& dEnd, const glm::vec2& dSide) {
                             glm::vec2 c0 = corner;
                             glm::vec2 c1 = corner + dEnd;
-                            glm::vec2 c2 = corner + dEnd + dLen;
-                            glm::vec2 c3 = corner + dLen;
+                            glm::vec2 c2 = corner + dEnd + dSide;
+                            glm::vec2 c3 = corner + dSide;
 
                             // Ensure strict CCW ordering in XZ (looking from above): cross product of (c1-c0) and (c3-c0) > 0
                             float k = (c1.x - c0.x) * (c3.y - c0.y) - (c1.y - c0.y) * (c3.x - c0.x);
@@ -1054,7 +1059,7 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                                 addOpaqueQuad(bL, tL, tR, bR, uvLeg, nOut, colLeg, colLeg, colLeg, colLeg);
                             }
 
-                            // Bottom cap facing down (-Y, CCW when viewed from below)
+                            // Bottom cap facing down (-Y, CCW when viewed from below) - double-sided for robustness
                             glm::vec3 v0(pts[0].x, py, pts[0].y);
                             glm::vec3 v1(pts[1].x, py, pts[1].y);
                             glm::vec3 v2(pts[2].x, py, pts[2].y);
@@ -1065,12 +1070,14 @@ ChunkMesh ChunkMesher::generateMesh(const Chunk& chunk,
                             glm::vec2 uvLB3(uvLegBot.x, uvLegBot.w);
                             addOpaqueTri(v0, v3, v2, uvLB0, uvLB3, uvLB2, glm::vec3(0.0f, -1.0f, 0.0f), colLeg, colLeg, colLeg);
                             addOpaqueTri(v0, v2, v1, uvLB0, uvLB2, uvLB1, glm::vec3(0.0f, -1.0f, 0.0f), colLeg, colLeg, colLeg);
+                            addOpaqueTri(v0, v1, v2, uvLB0, uvLB1, uvLB2, glm::vec3(0.0f, 1.0f, 0.0f), colLeg, colLeg, colLeg);
+                            addOpaqueTri(v0, v2, v3, uvLB0, uvLB2, uvLB3, glm::vec3(0.0f, 1.0f, 0.0f), colLeg, colLeg, colLeg);
                         };
 
-                        // Leg at corner P_end0: extends +uEnd * legW, +uIn * legD
-                        buildAndAddLeg(P_end0, uEnd * legW, uIn * legD);
-                        // Leg at corner P_end1: extends -uEnd * legW, +uIn * legD
-                        buildAndAddLeg(P_end1, -uEnd * legW, uIn * legD);
+                        // Leg at corner P_end0: extends +uEnd0 * legW, +uSide0 * legD (strictly flush with endboard and skirt 0)
+                        buildAndAddLeg(P_end0, uEnd0 * legW, uSide0 * legD);
+                        // Leg at corner P_end1: extends +uEnd1 * legW, +uSide1 * legD (strictly flush with endboard and skirt 1)
+                        buildAndAddLeg(P_end1, uEnd1 * legW, uSide1 * legD);
 
                         continue;
                     }

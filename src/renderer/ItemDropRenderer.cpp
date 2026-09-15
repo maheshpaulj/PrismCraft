@@ -219,9 +219,11 @@ void ItemDropManager::render(VkCommandBuffer cmd,
             }
 
             // Bottom cap (-Y)
-            addQuad(xf({-hw, yBase, -hw}), xf({-hw, yBase,  hw}), xf({ hw, yBase,  hw}), xf({ hw, yBase, -hw}), uvBot, glm::vec3(model * glm::vec4(0, -1, 0, 0)), flameCol);
+            addQuad(xf({-hw, yBase,  hw}), xf({-hw, yBase, -hw}), xf({ hw, yBase, -hw}), xf({ hw, yBase,  hw}), uvBot, glm::vec3(model * glm::vec4(0, -1, 0, 0)), flameCol);
+            addQuad(xf({-hw, yBase, -hw}), xf({-hw, yBase,  hw}), xf({ hw, yBase,  hw}), xf({ hw, yBase, -hw}), uvBot, glm::vec3(model * glm::vec4(0, 1, 0, 0)), flameCol);
             // Top cap (+Y)
-            addQuad(xf({-hw, yBase + hTotal,  hw}), xf({-hw, yBase + hTotal, -hw}), xf({ hw, yBase + hTotal, -hw}), xf({ hw, yBase + hTotal,  hw}), uvTop, glm::vec3(model * glm::vec4(0, 1, 0, 0)), flameCol);
+            addQuad(xf({-hw, yBase + hTotal, -hw}), xf({-hw, yBase + hTotal,  hw}), xf({ hw, yBase + hTotal,  hw}), xf({ hw, yBase + hTotal, -hw}), uvTop, glm::vec3(model * glm::vec4(0, 1, 0, 0)), flameCol);
+            addQuad(xf({-hw, yBase + hTotal,  hw}), xf({-hw, yBase + hTotal, -hw}), xf({ hw, yBase + hTotal, -hw}), xf({ hw, yBase + hTotal,  hw}), uvTop, glm::vec3(model * glm::vec4(0, -1, 0, 0)), flameCol);
             // Front face (+Z)
             addQuad(xf({ hw, yBase,  hw}), xf({ hw, yBase + hTotal,  hw}), xf({-hw, yBase + hTotal,  hw}), xf({-hw, yBase,  hw}), uvSide, glm::vec3(model * glm::vec4(0, 0, 1, 0)), flameCol);
             // Back face (-Z)

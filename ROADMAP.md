@@ -130,4 +130,95 @@
 
 ### 2. Advanced Graphics
 - **Hardware Ray Tracing**: Integration of `VK_KHR_ray_tracing_pipeline` for real-time RT soft shadows, ambient occlusion, and specular reflections on supported GPUs.
-- **Cross-Platform Compilation**: Fully modular build configuration supporting Linux x86_64 via Clang, Wayland/X11 windowing, and Vulkan drivers.\n
+- **Cross-Platform Compilation**: Fully modular build configuration supporting Linux x86_64 via Clang, Wayland/X11 windowing, and Vulkan drivers.
+
+---
+
+## 📌 Comprehensive Backlog & Feature Specifications
+
+### 🛡️ 1. Armor System & Boating Mechanics
+- **Complete Armor Tiers**:
+  - Tiers: Leather, Iron, Gold, Diamond, Netherite.
+  - Slots: Helmet, Chestplate, Leggings, Boots.
+  - Armor Points: 0 to 20 defense points represented on the HUD with triangular shield icons.
+  - Damage Reduction Formula: Authentic Minecraft reduction curve: $\text{damageTaken} = \text{damage} \times (1 - \min(20, \max(\text{armor} / 5, \text{armor} - \frac{\text{damage}}{2})) / 25)$.
+  - Durability: Degrades per hit taken; breaking sound effect on depletion.
+- **3D Wooden Boats**:
+  - Boat Variants: Oak, Spruce, Birch, Jungle, Acacia, Dark Oak.
+  - Triangular Fluid Physics: Buoyant floating body interacting with cellular water currents.
+  - Controls: Dual-paddle rowing controls (A/D for left/right paddles, W for both).
+  - Passenger Seating: Supports player and 1 passive mob.
+
+### 🏔️ 2. Advanced 3D Terrain Generation & Caverns
+- **3D Noise Overhangs**: Replace purely 2D heightmaps with multi-octave 3D Simplex noise densities ($y \in [0, 128]$) allowing arches, cliffs, and hollow overhangs.
+- **3D Cave Systems**:
+  - *Cheese Caves*: Large open subterranean chambers formed by low 3D noise densities.
+  - *Spaghetti Caves*: Narrow, sinuous tunnels weaving through deep underground layers.
+  - *Cave Biomes*: Dripstone caves with stalactites/stalagmites, Lush caves with moss, glow berries, and hanging vines.
+- **Continuous River Systems**: Voronoi-guided watercourses carving smooth canyon channels across biomes towards ocean sea level.
+
+### ⚡ 3. Core Engine Performance Improvements
+- **Multithreaded Greedy Mesher**:
+  - Parallel chunk meshing across thread pool workers with lock-free task queues.
+  - Equilateral triangular 2D face merging along Base, Left, and Right faces to dramatically reduce vertex counts.
+- **Indirect GPU Drawing**:
+  - Transition from individual draw calls to `vkCmdDrawIndexedIndirect` with GPU-side frustum culling.
+  - Multi-draw batching per material pipeline (Opaque, Water, Cutout).
+- **GPU Occlusion Culling**: Compute shader generating a 2-pass Hierarchical Z-Buffer (Hi-Z) to discard occluded underground chunks before vertex shading.
+
+### 🚀 4. Native AMD FidelityFX Super Resolution (FSR 2/3) SDK
+- **Replace Prototype Spatial Scaler**:
+  - Replace the current rudimentary spatial upscaler with the official **AMD FidelityFX FSR 2.2 / FSR 3** C++ SDK.
+- **Engine G-Buffer Requirements**:
+  - 16-bit 2D Motion Vector buffer ($\text{RG16\_SFLOAT}$) tracking camera and entity screen-space velocities.
+  - High-precision depth buffer ($\text{D32\_SFLOAT}$) reprojection.
+  - Sub-pixel camera projection matrix jittering using the Halton $(2, 3)$ sequence.
+  - Reactive Mask buffer identifying dynamic water, flame particles, and transparent cutouts.
+- **FSR Presets**: Native support for Ultra Quality, Quality, Balanced, and Ultra Performance with auto-exposure and RCAS sharpening.
+
+### 🔺 5. Authentic Triangular UI & HUD Theme
+- **Geometric Triangular HUD**:
+  - Health: 10 equilateral triangular hearts (with half-heart fills and poison/wither tints).
+  - Hunger: 10 triangular icons reflecting nutritional saturation.
+  - Armor Bar: 10 triangular shield icons above health.
+  - Breath Meter: 10 triangular bubble icons when submerged.
+- **Triangular Inventory & Menus**:
+  - Hotbar: Hexagonal / interlocking triangular cell frames reflecting the equilateral prism lattice.
+  - Pause & Settings Menus: Isometric triangular panel styling with sharp 60° beveled border accents.
+
+### 🎨 6. Faithful Flowing Triangular Textures
+- **Equilateral Texture Alignment**:
+  - Complete overhaul of block face UV coordinates to align with 60° equilateral triangle symmetry.
+  - Eliminates stretching and rectangular distortion across triangular prism top and bottom faces.
+  - Seamless flowing textures across adjacent 60° slanted walls and horizontal floors.
+
+### 🏛️ 7. Procedural Structures: Villages & Desert Temples
+- **Procedural Triangular Villages**:
+  - Multi-building settlement generation in Plains, Desert, and Savanna biomes.
+  - Village Centers with town wells, cobblestone/path triangular road grids, lamp posts.
+  - Diverse Architecture: Villager houses, libraries, butcher shops, blacksmiths with lava forges and loot chests.
+  - Farmland plots with wheat, carrots, potatoes, and irrigation channels.
+- **Desert Temples (Pyramids)**:
+  - Sandstone and orange/blue terracotta stepped pyramids.
+  - Symmetrical entrance towers and central altar chamber.
+  - Hidden basement crypt with pressure-plate TNT booby traps and 4 high-value treasure chests.
+- **Underground Dungeons**:
+  - Cobblestone and mossy cobblestone chambers with monster spawners and double loot chests.
+
+### 👾 8. Complete Mob AI & Entity Framework
+- **Triangular Honeycomb A\* Pathfinding**:
+  - Navigation mesh traversal across the 5-neighbor triangular honeycomb graph.
+  - Slanted climb evaluations and jump-step calculations for 60° terrain slopes.
+- **Mob Ecosystem**:
+  - Passive: Cows (milk, beef, leather), Pigs (saddle ride, pork), Sheep (16 wool colors), Chickens (eggs, feathers).
+  - Hostile: Zombies (daylight burn, door siege), Skeletons (trajectory bow aiming), Creepers (proximity hiss and triangular crater explosions), Spiders (wall climbing).
+
+### 🌌 9. Other Dimensions: The Nether & The End
+- **The Nether**:
+  - Triangular Obsidian Portals (minimum 4×5 frame activated by Flint and Steel).
+  - Nether Fortresses: Elevated bridge networks, Nether Wart rooms, Blaze spawners.
+  - Biomes: Nether Wastes, Crimson Forest, Warped Forest, Soul Sand Valley, Basalt Deltas.
+- **The End**:
+  - Stronghold End Portal frames requiring Eyes of Ender.
+  - Obsidian monolith towers with healing End Crystals.
+  - Fully animated Ender Dragon boss encounter, Dragon Breath particle clouds, and exit portal fountain.\n

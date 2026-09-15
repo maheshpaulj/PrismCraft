@@ -655,6 +655,7 @@ void run() {
     float miningTimer = 0.0f;
     std::optional<CellCoord> currentMiningCell = std::nullopt;
     int crackStage = -1;
+    float breakCooldown = 0.0f;
 
     float loadingProgress = 0.0f;
     int loadingLoadedChunks = 0;
@@ -1129,6 +1130,10 @@ void run() {
                     }
                 }
 
+                if (breakCooldown > 0.0f) {
+                    breakCooldown = std::max(0.0f, breakCooldown - dt);
+                }
+
                 // Left click ALWAYS triggers punch/hit animation (air or block)
                 if (Input::isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT)) {
                     player.triggerSwing();
@@ -1138,19 +1143,24 @@ void run() {
                 if (Input::isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT) && targetHit.has_value()) {
                     const CellCoord& hit = targetHit->hitCell;
 
-                    if (!currentMiningCell.has_value() ||
-                        currentMiningCell->x != hit.x || currentMiningCell->y != hit.y ||
-                        currentMiningCell->z != hit.z || currentMiningCell->s != hit.s) {
-                        currentMiningCell = hit;
+                    if (!player.isCreative() && breakCooldown > 0.0f) {
                         miningTimer = 0.0f;
-                    }
+                        currentMiningCell = std::nullopt;
+                        crackStage = -1;
+                    } else {
+                        if (!currentMiningCell.has_value() ||
+                            currentMiningCell->x != hit.x || currentMiningCell->y != hit.y ||
+                            currentMiningCell->z != hit.z || currentMiningCell->s != hit.s) {
+                            currentMiningCell = hit;
+                            miningTimer = 0.0f;
+                        }
 
-                    miningTimer += dt;
-                    Cell targetCell = world->getCell(hit.x, hit.y, hit.z, hit.s);
-                    float breakDuration = player.isCreative() ? 0.0f : calculateBreakDuration(targetCell.type, player.getSelectedBlock());
-                    crackStage = (breakDuration > 0.0f) ? std::clamp(static_cast<int>((miningTimer / breakDuration) * 10.0f), 0, 9) : 0;
+                        miningTimer += dt;
+                        Cell targetCell = world->getCell(hit.x, hit.y, hit.z, hit.s);
+                        float breakDuration = player.isCreative() ? 0.0f : calculateBreakDuration(targetCell.type, player.getSelectedBlock());
+                        crackStage = (breakDuration > 0.0f) ? std::clamp(static_cast<int>((miningTimer / breakDuration) * 10.0f), 0, 9) : 0;
 
-                    if (miningTimer >= breakDuration) {
+                        if (miningTimer >= breakDuration) {
                         Cell broken = world->getCell(hit.x, hit.y, hit.z, hit.s);
                         world->setCellInstant(hit.x, hit.y, hit.z, hit.s, Cell{BlockType::Air});
                         AudioEngine::get().playBlockDig(static_cast<int>(broken.type), 0.9f);
@@ -1238,6 +1248,10 @@ void run() {
                         miningTimer = 0.0f;
                         currentMiningCell = std::nullopt;
                         crackStage = -1;
+                        if (!player.isCreative()) {
+                            breakCooldown = 0.25f; // Minecraft 5-tick (0.25s) hit delay
+                        }
+                    }
                     }
                 } else {
                     miningTimer = 0.0f;

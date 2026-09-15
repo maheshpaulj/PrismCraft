@@ -164,20 +164,16 @@ To generate a portable zero-dependency ZIP archive and Inno Setup installer:
 
 See [ROADMAP.md](ROADMAP.md) for full phase details and technical design notes.
 
-### 🎯 v0.2.0 (Mob AI & Combat Framework)
-- [ ] **Triangular Graph A\* Pathfinding**: Implement navigation mesh traversal adapted for the 5-neighbor triangular honeycomb lattice.
+### 🎯 v0.2.0 (Mob AI, Combat & Equipment)
+- [ ] **Triangular Graph A\* Pathfinding**: Navigation mesh traversal adapted for the 5-neighbor triangular honeycomb lattice.
 - [ ] **Entity Component System (ECS)**: Lightweight data-oriented entity management for mobs, projectiles, and dropped items.
-- [ ] **Passive Animals**:
-  - [ ] Pig (mounts with saddle, food drops)
-  - [ ] Cow (leather & beef drops, milking)
-  - [ ] Sheep (shearable colored wool variations)
-  - [ ] Chicken (egg laying mechanics, feather drops)
-- [ ] **Hostile Mobs**:
-  - [ ] Zombie (daylight burning, melee attack, door banging)
-  - [ ] Skeleton (ranged bow attack with triangular projectile trajectory)
-  - [ ] Creeper (fuse countdown, triangular crater terrain destruction)
-  - [ ] Spider (climbing slanted prism walls)
-- [ ] **Combat Mechanics**: Weapon damage stats, knockback impulse, critical hits, hurt sounds, and red flash damage overlays.
+- [ ] **Armor & Equipment System**:
+  - [ ] Leather, Iron, Gold, Diamond, Netherite armor pieces (Helmet, Chestplate, Leggings, Boots).
+  - [ ] Triangular armor bar HUD indicators and authentic damage reduction formulas.
+- [ ] **3D Wooden Boats**: Buoyant fluid physics on cellular water, dual-paddle rowing controls, passenger seating.
+- [ ] **Passive Animals**: Pig (saddle ride), Cow (milking, beef/leather), Sheep (colored wool shearing), Chicken (egg laying).
+- [ ] **Hostile Mobs**: Zombie (daylight burning, door siege), Skeleton (parabolic archery), Creeper (triangular crater detonation), Spider (slanted wall climbing).
+- [ ] **Combat Mechanics**: Weapon damage tiers, knockback impulse, critical hits, hurt sounds, and red flash damage overlays.
 
 ### 🌐 v0.3.0 (Multiplayer & Networking)
 - [ ] **Dedicated Client-Server Architecture**: Standalone headless server binary.
@@ -188,13 +184,13 @@ See [ROADMAP.md](ROADMAP.md) for full phase details and technical design notes.
 
 ### 🌌 v0.4.0 (Dimensions & Realm Travel)
 - [ ] **The Nether Realm**:
-  - [ ] Nether generation (Netherrack, Soul Sand Valleys, Basalt Deltas, Crimson/Warped Forests).
+  - [ ] Dual-ceiling 3D cave generation (Netherrack, Soul Sand Valleys, Basalt Deltas, Crimson/Warped Forests).
   - [ ] Triangular Obsidian Nether Portals with custom swirl screen shaders.
-  - [ ] Lava oceans with custom visceral fluid shaders.
+  - [ ] Lava oceans with custom visceral fluid shaders and Nether Fortresses.
 - [ ] **The End Dimension**:
   - [ ] Central floating island generation with Obsidian Pillars.
   - [ ] Void death plane and End Gateway portals.
-  - [ ] Ender Dragon boss fight mechanics.
+  - [ ] Ender Dragon boss encounter with animated spline models and healing End Crystals.
 
 ### ⚡ v0.5.0 (Redstone & Triangular Logic Circuitry)
 - [ ] **Triangular Redstone Signal Propagation**: Power distribution rules across 5 adjacent neighbors.
@@ -203,6 +199,14 @@ See [ROADMAP.md](ROADMAP.md) for full phase details and technical design notes.
   - [ ] Redstone Torches, Levers, Buttons, and Pressure Plates.
   - [ ] Repeaters (delay adjustment) and Comparators.
   - [ ] Normal and Sticky Triangular Pistons with block pushing constraints.
+
+### 🚀 Advanced Performance, Shading & World Gen Backlog
+- [ ] **Native AMD FidelityFX Super Resolution (FSR 2/3) SDK**: Official C++ SDK integration with motion vectors, depth reprojection, and reactive masks.
+- [ ] **Advanced 3D Terrain & Caves**: Multi-octave 3D Simplex overhangs, cheese caverns, spaghetti tunnels, and continuous valley-carving rivers.
+- [ ] **Procedural Structures**: Multi-building triangular villages with roads, farms, and blacksmiths; desert temples with secret pressure-plate TNT traps and loot crypts.
+- [ ] **Authentic Triangular UI Theme**: Triangular health hearts, triangular hunger drumsticks, hexagonal/triangular hotbar slots, and isometric UI panels.
+- [ ] **Faithful Flowing Triangular Textures**: 60° equilateral texture mapping preserving natural honeycomb symmetries across walls and floors.
+- [ ] **GPU Indirect Drawing & Multithreaded Mesher**: `vkCmdDrawIndexedIndirect` with GPU-side frustum culling and parallel greedy meshing.
 
 ### 📦 v1.0.0 (Extensibility, Modding & Optimization)
 - [ ] **Lua/C++ Scripting API**: Dynamic block registration, custom crafting recipes, and event hooks.
